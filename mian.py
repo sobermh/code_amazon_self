@@ -42,18 +42,15 @@ def init_driver():
     options.add_argument("--disable-dev-shm-usage")
 
     options.add_argument("--lang=zh-CN")  # 添加此行以设置默认语言为中文
-    chrome_driver_path = Service(r"E:\github_repositories\self_code_amazon\chromedriver.exe")  # 替换为你本地 ChromeDriver 的路径
+    chrome_driver_path = Service(r"chromedriver.exe")  # 替换为你本地 ChromeDriver 的路径
 
     # 选择可用的代理服务器
     options.add_argument(f'user-agent={random.choice(user_agents)}')
-    proxy_list = ["http://127.0.0.1:7898", "http://127.0.0.1:8890"]
-    for proxy in proxy_list:
-        try:
-            options.add_argument(f'--proxy-server={proxy}')
-            driver = webdriver.Chrome(service=chrome_driver_path, options=options)
-            break
-        except Exception as e:
-            pass
+    proxy = "http://127.0.0.1:8890" # home
+    # proxy = "https://127.0.0.1:8890" # ver
+    options.add_argument(f'--proxy-server={proxy}')
+    driver = webdriver.Chrome(service=chrome_driver_path, options=options)
+
 
     # 禁用webdriver特征，以防止被检测
     try:
