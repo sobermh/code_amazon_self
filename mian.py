@@ -30,10 +30,6 @@ def init_driver():
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15",
 
     ]
-    options.add_argument(f'user-agent={random.choice(user_agents)}')
-
-    proxy = "http://127.0.0.1:7898"  # 替换为你的代理IP和端口
-    options.add_argument(f'--proxy-server={proxy}')
 
     # options.add_argument("--headless")  # 无头模式
     options.add_argument("--disable-infobars")  # 禁止显示chrome的浏览器正在受到自动测试软件控制的通知栏
@@ -48,8 +44,16 @@ def init_driver():
     options.add_argument("--lang=zh-CN")  # 添加此行以设置默认语言为中文
     chrome_driver_path = Service(r"E:\github_repositories\self_code_amazon\chromedriver.exe")  # 替换为你本地 ChromeDriver 的路径
 
-    driver = webdriver.Chrome(service=chrome_driver_path, options=options)
-    # 指定 ChromeDriver 的本地路径
+    # 选择可用的代理服务器
+    options.add_argument(f'user-agent={random.choice(user_agents)}')
+    proxy_list = ["http://127.0.0.1:7898", "http://127.0.0.1:8890"]
+    for proxy in proxy_list:
+        try:
+            options.add_argument(f'--proxy-server={proxy}')
+            driver = webdriver.Chrome(service=chrome_driver_path, options=options)
+            break
+        except Exception as e:
+            pass
 
     # 禁用webdriver特征，以防止被检测
     try:
