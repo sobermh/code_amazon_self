@@ -277,6 +277,7 @@ def process_second_category(i, data_file):
         for c in products_list:
             for key, value in c.items():
                 save_to_csv(i["category"], k["category"], key, data_file, value)
+        break
 
 
 if __name__ == '__main__':
