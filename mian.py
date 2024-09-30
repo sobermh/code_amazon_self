@@ -208,7 +208,7 @@ def parse_third_category(url):
     return category_list
 
 
-def parse_min_category(url):
+def parse_min_category(url, third_category):
     driver = init_driver()
     open_url(driver, url)
     wait = WebDriverWait(driver, 10)
@@ -224,9 +224,13 @@ def parse_min_category(url):
             category_link = link_tag['href']
             base_url = parse_region_url(url)
             category_list.append({'category': category_name, 'link': base_url+category_link})
-    del category_list[:2]
-    driver.quit()
-    return category_list
+    if category_list[1:] == third_category:
+        driver.quit()
+        return []
+    else:
+        del category_list[:2]
+        driver.quit()
+        return category_list
 
 
 def init_csv(filename):
@@ -253,7 +257,7 @@ def parse_region_url(url):
 def process_second_category(i, data_file):
     third_category = parse_third_category(i['link'])
     for k in third_category:
-        min_category = parse_min_category(k['link'])
+        min_category = parse_min_category(k['link'], third_category)
         threads = []
         products_list = []
 
