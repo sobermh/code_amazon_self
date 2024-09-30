@@ -49,7 +49,12 @@ def init_driver():
     proxy = "http://127.0.0.1:8890"  # home
     # proxy = "https://127.0.0.1:8890" # ver
     options.add_argument(f'--proxy-server={proxy}')
-    driver = webdriver.Chrome(service=chrome_driver_path, options=options)
+    while True:
+        try:
+            driver = webdriver.Chrome(service=chrome_driver_path, options=options)
+            break
+        except Exception as e:
+            time.sleep(30)
 
     # 禁用webdriver特征，以防止被检测
     try:
@@ -299,6 +304,6 @@ if __name__ == '__main__':
     #         for c in products_list:
     #             for key, value in c.items():
     #                 save_to_csv(i["category"], k["category"], key, data_file, value)
-    print("Total saved:", total_saved.value)
+
     end = time.time()
     print("Time taken:", end - start, "seconds")
