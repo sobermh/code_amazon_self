@@ -46,11 +46,10 @@ def init_driver():
 
     # 选择可用的代理服务器
     options.add_argument(f'user-agent={random.choice(user_agents)}')
-    proxy = "http://127.0.0.1:8890" # home
+    proxy = "http://127.0.0.1:8890"  # home
     # proxy = "https://127.0.0.1:8890" # ver
     options.add_argument(f'--proxy-server={proxy}')
     driver = webdriver.Chrome(service=chrome_driver_path, options=options)
-
 
     # 禁用webdriver特征，以防止被检测
     try:
@@ -139,20 +138,23 @@ def scrape_amazon_products(url):
     return pro1_info + pro2_info
 
 
-# 创建锁对象
-lock = threading.Lock()
+# 创建一个可以在多个进程之间共享的变量
+total_saved = multiprocessing.Value('i', 0)
 
 
 def save_to_csv(second_category, third_category, min_category, data_file, data):
-    with lock:
-        with open(data_file, 'a', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            for item in data:
-                row_data = [second_category, third_category, min_category]
-                for key, value in item.items():
-                    row_data.append(value)
-                writer.writerow(row_data)
-        print(f"{second_category}-{third_category}-{min_category} saved to {data_file} successfully.")
+    # with lock:
+    #     with open(data_file, 'a', newline='', encoding='utf-8') as f:
+    #         writer = csv.writer(f)
+    #         for item in data:
+    #             row_data = [second_category, third_category, min_category]
+    #             for key, value in item.items():
+    #                 row_data.append(value)
+    #             writer.writerow(row_data)
+    #     print(f"{second_category}-{third_category}-{min_category} saved to {data_file} successfully.")
+    print(len(data))
+    total_saved.value += len(data)
+    print(f"{second_category}-{third_category}-{min_category} saved to {data_file} successfully.")
 
 
 def format_csv(data_file):
@@ -297,5 +299,6 @@ if __name__ == '__main__':
     #         for c in products_list:
     #             for key, value in c.items():
     #                 save_to_csv(i["category"], k["category"], key, data_file, value)
+    print("Total saved:", total_saved.value)
     end = time.time()
     print("Time taken:", end - start, "seconds")
