@@ -3,6 +3,7 @@ import multiprocessing
 import os
 import re
 import threading
+from httpcore import TimeoutException
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 
@@ -14,16 +15,26 @@ import random
 from bs4 import BeautifulSoup
 
 
+def translate_text(text):
+    from googletrans import Translator
+
+    translator = Translator()
+
+    translated = translator.translate(text, src='zh-cn', dest='en')
+
+    return translated.text
+
+
 def init_driver():
     # 设置Chrome选项
     options = webdriver.ChromeOptions()
 
     options.add_argument('--lang=en')
-    prefs = {
-        "translate_whitelists": {"en": "zh-CN"},  # 将英语翻译为中文
-        "translate": {"enabled": "true"}
-    }
-    options.add_experimental_option("prefs", prefs)
+    # prefs = {
+    #     "translate_whitelists": {"en": "zh-CN"},  # 将英语翻译为中文
+    #     "translate": {"enabled": "true"}
+    # }
+    # options.add_experimental_option("prefs", prefs)
 
     user_agents = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
@@ -46,9 +57,9 @@ def init_driver():
 
     # 选择可用的代理服务器
     options.add_argument(f'user-agent={random.choice(user_agents)}')
-    proxy = "http://127.0.0.1:8890"  # home
-    # proxy = "https://127.0.0.1:8890" # ver
-    options.add_argument(f'--proxy-server={proxy}')
+    # proxy = "http://127.0.0.1:8890"  # home
+    # proxy = "http://127.0.0.1:7898"  # ver
+    # options.add_argument(f'--proxy-server={proxy}')
     while True:
         try:
             driver = webdriver.Chrome(service=chrome_driver_path, options=options)
@@ -87,9 +98,7 @@ def load_html(driver):
         # 判断是否已经滚动到页面底部
         if scroll_position + window_height < scroll_height:
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            wait = WebDriverWait(driver, 10)
-            wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "#gridItemRoot")))
-            # time.sleep(scroll_pause_time)  # 等待加载
+            time.sleep(0.5)
         else:
             break
     return driver.page_source
@@ -100,20 +109,78 @@ def parse_product(url, soup_html, start_index=0):
     product_html = soup_html.select("#gridItemRoot")  # 根据实际的类名调整选择器
     product_list = []
     for index, product in enumerate(product_html):
-        product_info = {}
-        a = product.find_all('a', class_='a-link-normal')[1].get('href')
-        title = product.find_all('a', class_='a-link-normal')[1].text
         try:
-            price = product.find_all('a', class_='a-link-normal')[3].text
-        except IndexError:
-            price = ''
-        product_list.append({'rank': start_index+index+1,  'title': title, 'price': price, 'link': base_url+a})
-
+            a = product.find_all('a', class_='a-link-normal')[1].get('href')
+            title = product.find_all('a', class_='a-link-normal')[1].text
+            try:
+                price = product.find_all('a', class_='a-link-normal')[3].text
+            except IndexError:
+                price = ''
+            product_list.append({'rank': start_index+index+1,  'title': title, 'price': price, 'link': base_url+a})
+        except Exception as e:
+            continue
     return product_list
 
 
-def parse_product_info(url, soup_html, wait):
-    wait.until(EC.presence_of_element_located((By.ID, "dp")))
+def parse_product_info(url):
+    driver = init_driver()
+    open_url(driver, url)
+    wait = WebDriverWait(driver, 5)
+    load_html(driver)
+
+    product_info = {
+        'dimensions': '',
+        'date': '',
+        'rank': ''
+    }
+    try:
+        wait.until(EC.presence_of_element_located((By.ID, "detailBullets_feature_div")))
+        soup = BeautifulSoup(driver.page_source, 'html.parser')
+        info_section = soup.find('div', {'id': 'detailBullets_feature_div'})
+        info_section2 = soup.find_all(
+            'ul', {'class': 'a-unordered-list a-nostyle a-vertical a-spacing-none detail-bullet-list'})[1]
+        for li in info_section.find_all('li'):
+            text = li.get_text(strip=True)
+            if 'Product Dimensions' in text:
+                product_info['dimensions'] = re.sub(r'[\u200e\u200f]', '', text.split(':')[-1].strip())
+            elif 'Date First Available' in text:
+                product_info['date'] = re.sub(r'[\u200e\u200f]', '', text.split(':')[-1].strip())
+        for li in info_section2.find_all('li'):
+            text = li.get_text(strip=True)
+            if 'Best Sellers Rank' in text:
+                ranks = re.findall(r'#(\d+)\s+in\s*([A-Za-z\s]+)',
+                                   re.sub(r'[\u200e\u200f]', '', text.split(':')[-1].strip()))
+                rank_dict = {category.strip(): rank for rank, category in ranks}
+                product_info['rank'] = rank_dict
+    except Exception:
+        try:
+            wait.until(EC.presence_of_element_located((By.ID, "prodDetails")))
+            soup = BeautifulSoup(driver.page_source, 'html.parser')
+            info_section = soup.find('div', {'id': 'prodDetails'})
+            # 提取产品技术细节
+            tech_table = info_section.find('table', {'id': 'productDetails_techSpec_section_1'})
+            for row in tech_table.find_all('tr'):
+                key = row.find('th').get_text(strip=True)
+                value = row.find('td').get_text(strip=True)
+                if key == 'Product Dimensions':
+                    product_info['dimensions'] = re.sub(r'[\u200e\u200f]', '', value)
+            # 提取附加信息
+            additional_table = info_section.find('table', {'id': 'productDetails_detailBullets_sections1'})
+            for row in additional_table.find_all('tr'):
+                key = row.find('th').get_text(strip=True)
+                value = row.find('td').get_text(strip=True)
+                if key == 'Best Sellers Rank':
+                    anks = re.findall(r'#(\d+)\s+in\s*([A-Za-z\s]+)',
+                                      re.sub(r'[\u200e\u200f]', '', value))
+                    rank_dict = {category.strip(): rank for rank, category in anks}
+                    product_info['rank'] = rank_dict
+                elif key == 'Date First Available':
+                    product_info['date'] = re.sub(r'[\u200e\u200f]', '', value)
+        except Exception as e:
+            print(e)
+    finally:
+        driver.quit()
+    return product_info
 
 
 def last_page(driver):
@@ -125,7 +192,7 @@ def last_page(driver):
 def scrape_amazon_products(url):
     driver = init_driver()
     open_url(driver, url)
-    wait = WebDriverWait(driver, 10)
+    wait = WebDriverWait(driver, 5)
     try:
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#gridItemRoot")))
     except:
@@ -143,23 +210,19 @@ def scrape_amazon_products(url):
     return pro1_info + pro2_info
 
 
-# 创建一个可以在多个进程之间共享的变量
-total_saved = multiprocessing.Value('i', 0)
+lock = multiprocessing.Lock()
 
 
 def save_to_csv(second_category, third_category, min_category, data_file, data):
-    # with lock:
-    #     with open(data_file, 'a', newline='', encoding='utf-8') as f:
-    #         writer = csv.writer(f)
-    #         for item in data:
-    #             row_data = [second_category, third_category, min_category]
-    #             for key, value in item.items():
-    #                 row_data.append(value)
-    #             writer.writerow(row_data)
-    #     print(f"{second_category}-{third_category}-{min_category} saved to {data_file} successfully.")
-    print(len(data))
-    total_saved.value += len(data)
-    print(f"{second_category}-{third_category}-{min_category} saved to {data_file} successfully.")
+    with lock:
+        with open(data_file, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            for item in data:
+                row_data = [second_category, third_category, min_category]
+                for key, value in item.items():
+                    row_data.append(value)
+                writer.writerow(row_data)
+        print(f"{second_category}-{third_category}-{min_category} saved to {data_file} successfully.")
 
 
 def format_csv(data_file):
@@ -169,7 +232,7 @@ def format_csv(data_file):
 def parse_second_category(url):
     driver = init_driver()
     open_url(driver, url)
-    wait = WebDriverWait(driver, 10)
+    wait = WebDriverWait(driver, 5)
     wait.until(EC.presence_of_element_located((By.ID, "zg-left-col")))
     category_list = []
     soup = BeautifulSoup(driver.page_source, 'html.parser')
@@ -190,7 +253,7 @@ def parse_second_category(url):
 def parse_third_category(url):
     driver = init_driver()
     open_url(driver, url)
-    wait = WebDriverWait(driver, 10)
+    wait = WebDriverWait(driver, 5)
     wait.until(EC.presence_of_element_located((By.ID, "zg-left-col")))
     category_list = []
     soup = BeautifulSoup(driver.page_source, 'html.parser')
@@ -211,7 +274,7 @@ def parse_third_category(url):
 def parse_min_category(url, third_category):
     driver = init_driver()
     open_url(driver, url)
-    wait = WebDriverWait(driver, 10)
+    wait = WebDriverWait(driver, 5)
     wait.until(EC.presence_of_element_located((By.ID, "zg-left-col")))
     category_list = []
     soup = BeautifulSoup(driver.page_source, 'html.parser')
@@ -281,34 +344,18 @@ def process_second_category(i, data_file):
 
 
 if __name__ == '__main__':
-    start = time.time()
-    data_file = 'office_amazon_products.csv'
-    init_csv(data_file)
-    url = 'https://www.amazon.ae/gp/bestsellers/office-products/ref=zg_bs_unv_office-products_1_15193872031_2'
-    second_category = parse_second_category(url)
-    # 获取 CPU 核心数
-    cpu_count = multiprocessing.cpu_count()  # 获取CPU核心数量
-    with multiprocessing.Pool(processes=cpu_count) as pool:
-        pool.starmap(process_second_category, [(i, data_file) for i in second_category])
+    # start = time.time()
+    # data_file = 'office_amazon_products.csv'
+    # init_csv(data_file)
+    # url = 'https://www.amazon.ae/gp/bestsellers/office-products/ref=zg_bs_unv_office-products_1_15193872031_2'
+    # second_category = parse_second_category(url)
+    # # 获取 CPU 核心数
+    # cpu_count = multiprocessing.cpu_count()  # 获取CPU核心数量
+    # with multiprocessing.Pool(processes=cpu_count) as pool:
+    #     pool.starmap(process_second_category, [(i, data_file) for i in second_category[:1]])
 
-    # for i in second_category:
-    #     third_category = parse_third_category(i['link'])
-    #     for k in third_category:
-    #         min_category = parse_min_category(k['link'])
-    #         threads = []
-    #         products_list = []
-    #         for j in min_category:
-    #             def selenium_task(category, url):
-    #                 products = scrape_amazon_products(url)
-    #                 products_list.append({category: products})
-    #             thread = threading.Thread(target=selenium_task, args=(j["category"], j['link'],))
-    #             threads.append(thread)
-    #             thread.start()
-    #         for thread in threads:
-    #             thread.join()
-    #         for c in products_list:
-    #             for key, value in c.items():
-    #                 save_to_csv(i["category"], k["category"], key, data_file, value)
+    # end = time.time()
+    # print("Time taken:", end - start, "seconds")
 
-    end = time.time()
-    print("Time taken:", end - start, "seconds")
+    url = "https://www.amazon.ae/Montchi-Stickers-Motivational-Holographic-Classroom/dp/B0D4VJP48L/ref=zg_bs_g_15172571031_d_sccl_1/262-9087435-0427238?th=1"
+    parse_product_info(url)
