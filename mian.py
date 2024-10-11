@@ -259,7 +259,7 @@ class ParseData:
                 if ParseData.check_for_captcha(driver):
                     ParseData.valid_for_captcha(driver)
                 else:
-                    print(e)
+                    print(url)
                     break
         return flag
 
@@ -360,7 +360,7 @@ class ParseData:
         return pro1_list + pro2_list
 
     @staticmethod
-    def scrape_product_info(driver: webdriver.Chrome, url,scrape_product_info):
+    def scrape_product_info(driver: webdriver.Chrome, url, scrape_product_info):
         product_info = {
             'dimensions': '',
             'date': '',
