@@ -129,6 +129,8 @@ class WebOp:
         ]
 
         # options.add_argument("--headless")  # 无头模式
+        options.add_argument('--ignore-certificate-errors-spki-list')
+        options.add_argument('--ignore-ssl-errors')
         options.add_argument("--disable-infobars")  # 禁止显示chrome的浏览器正在受到自动测试软件控制的通知栏
         options.add_argument("start-maximized")
         options.add_argument("--disable-blink-features=AutomationControlled")  # 禁用自动化检测
@@ -406,7 +408,7 @@ class ParseData:
                             product_info['date'] = re.sub(r'[\u200e\u200f]', '', value)
                 except Exception as e:
                     print(e)
-                    CsvOp.write_error_url(error_url_file, url)
+                    CsvOp.write_error_url(error_url_file, [url])
 
         def parse_pro_soldby(html_soup: BeautifulSoup):
             sold_by_div = html_soup.find('div', {'id': 'offerDisplayFeatures_desktop'})
