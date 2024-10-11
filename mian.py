@@ -5,6 +5,7 @@ import multiprocessing
 import os
 import re
 import threading
+from amazoncaptcha import AmazonCaptcha
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 
@@ -31,24 +32,14 @@ def save_html(filepath, html):
         file.write(html)
 
 
-def last_page(driver):
-    last_page_element = driver.find_element(By.CLASS_NAME, "a-last")
-    last_page_link = last_page_element.find_element(By.TAG_NAME, "a")
-    last_page_link.click()
-
-
 lock = multiprocessing.Lock()
-
-
-def format_csv(csv_file):
-    pass
 
 
 def process_second_category(i, csv_file):
     pro_driver = WebOp.init_driver()
-    third_category = ParseData.parse_third_category(pro_driver, i)
+    third_category = ParseData.scrape_third_category(pro_driver, i)
     for k in third_category:
-        min_category = ParseData.parse_min_category(pro_driver, k, third_category, i["category"])
+        min_category = ParseData.scrape_min_category(pro_driver, k, third_category, i["category"])
         threads = []
         products_list = []
 
@@ -221,12 +212,64 @@ class WebOp:
                 break
         return driver.page_source
 
+    @staticmethod
+    def last_page(driver):
+        last_page_element = driver.find_element(By.CLASS_NAME, "a-last")
+        last_page_link = last_page_element.find_element(By.TAG_NAME, "a")
+        last_page_link.click()
+
 
 class ParseData:
+
     @staticmethod
-    def parse_second_category(driver: webdriver.Chrome, url):
+    def check_for_captcha(driver: webdriver.Chrome):
+        soup = BeautifulSoup(driver.page_source, 'html.parser')
+        captcha_form = soup.find('form', {'method': 'get', 'action': '/errors/validateCaptcha'})
+        if captcha_form is not None:
+            return True
+        else:
+            return False
+
+    @staticmethod
+    def valid_for_captcha(driver: webdriver.Chrome):
+        captcha = AmazonCaptcha.fromdriver(driver)
+        captcha = AmazonCaptcha.fromlink(captcha.image_link)
+        solution = captcha.solve()
+        input_element = driver.find_element(By.ID, "captchacharacters")
+        input_element.clear()
+        input_element.send_keys(solution)
+
+        submit_button = driver.find_element(By.CLASS_NAME, "a-button-text")
+        submit_button.click()
+
+    @staticmethod
+    def init_web(driver: webdriver.Chrome, url, wait_condition):
+        WebOp.open_url(driver, url)
         wait = WebDriverWait(driver, 5)
-        wait.until(EC.presence_of_element_located((By.ID, "zg-left-col")))
+        start_time = time.time()  # 记录开始时间
+        flag = False
+        while True:
+            if time.time() - start_time > 30:  # 如果已经超过30秒，就跳出循环
+                break
+            try:
+                wait.until(EC.presence_of_element_located((wait_condition)))
+                flag = True
+                break
+            except Exception as e:
+                if ParseData.check_for_captcha(driver):
+                    ParseData.valid_for_captcha(driver)
+                else:
+                    print(e)
+                    print("page error")
+                    print('*******************************')
+                    print("url")
+                    break
+        return flag
+
+    @staticmethod
+    def scrape_second_category(driver: webdriver.Chrome, url):
+        wait_condition = (By.ID, "zg-left-col")
+        ParseData.init_web(driver, url,  wait_condition)
         category_list = []
         soup = BeautifulSoup(driver.page_source, 'html.parser')
         category_html = soup.select(
@@ -241,10 +284,9 @@ class ParseData:
         return category_list
 
     @staticmethod
-    def parse_third_category(driver: webdriver.Chrome, i):
-        WebOp.open_url(driver, i["link"])
-        wait = WebDriverWait(driver, 5)
-        wait.until(EC.presence_of_element_located((By.ID, "zg-left-col")))
+    def scrape_third_category(driver: webdriver.Chrome, i):
+        wait_condition = (By.ID, "zg-left-col")
+        ParseData.init_web(driver, i["link"], wait_condition)
         category_list = []
         soup = BeautifulSoup(driver.page_source, 'html.parser')
         category_html = soup.select(
@@ -259,12 +301,11 @@ class ParseData:
         third_category = category_list[1:]
         return third_category
 
-    @ staticmethod
-    def parse_min_category(driver: webdriver.Chrome, k, third_categorys, second_category):
-        WebOp.open_url(driver, k['link'])
+    @staticmethod
+    def scrape_min_category(driver: webdriver.Chrome, k, third_categorys, second_category):
+        wait_condition = (By.ID, "zg-left-col")
+        ParseData.init_web(driver, k['link'], wait_condition)
         category_list = []
-        wait = WebDriverWait(driver, 5)
-        wait.until(EC.presence_of_element_located((By.ID, "zg-left-col")))
         soup = BeautifulSoup(driver.page_source, 'html.parser')
         category_html = soup.select(
             "._p13n-zg-nav-tree-all_style_zg-browse-item__1rdKf._p13n-zg-nav-tree-all_style_zg-browse-height-large__1z5B8")
@@ -287,12 +328,6 @@ class ParseData:
         return min_category
 
     @staticmethod
-    def parse_region_url(url):
-        match = re.match(r'(https?://[^/]+)', url)
-        base_url = match.group(0) if match else ""
-        return base_url
-
-    @staticmethod
     def scrape_products(driver: webdriver.Chrome, url):
         def parse_product(url, soup_html, start_index=0):
             base_url = ParseData.parse_region_url(url)
@@ -311,18 +346,16 @@ class ParseData:
                 except Exception as e:
                     continue
             return product_list
-        WebOp.open_url(driver, url)
-        wait = WebDriverWait(driver, 5)
-        try:
-            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#gridItemRoot")))
-        except:
-            return [{},]
+        wait_condition = (By.CSS_SELECTOR, "#gridItemRoot")
+        load_flag = ParseData.init_web(driver, url, wait_condition)
+        if not load_flag:
+            return [{}, ]
         page_html = WebOp.load_html(driver)
         soup = BeautifulSoup(page_html, 'html.parser')
         pro1_list = parse_product(url, soup)
         # 可能没有下一页
         try:
-            last_page(driver)
+            WebOp.last_page(driver)
             page_html = WebOp.load_html(driver)
             pro2_list = parse_product(url, BeautifulSoup(page_html, 'html.parser'), start_index=50)
         except:
@@ -331,9 +364,6 @@ class ParseData:
 
     @staticmethod
     def scrape_product_info(driver: webdriver.Chrome, url):
-        WebOp.open_url(driver, url)
-
-        wait = WebDriverWait(driver, 5)
         WebOp.load_html(driver)
         product_info = {
             'dimensions': '',
@@ -341,9 +371,9 @@ class ParseData:
             'rank': '',
             "soldby": "",
         }
-
-        try:
-            wait.until(EC.presence_of_element_located((By.ID, "detailBullets_feature_div")))
+        wait_condition1 = (By.ID, "detailBullets_feature_div")
+        load_flag1 = ParseData.init_web(driver, url, wait_condition1)
+        if load_flag1:
             soup = BeautifulSoup(driver.page_source, 'html.parser')
             info_section = soup.find('div', {'id': 'detailBullets_feature_div'})
             info_section2 = soup.find_all(
@@ -361,9 +391,10 @@ class ParseData:
                                        re.sub(r'[\u200e\u200f]', '', text.split(':')[-1].strip()))
                     rank_dict = {category.strip(): rank for rank, category in ranks}
                     product_info['rank'] = rank_dict
-        except Exception:
-            try:
-                wait.until(EC.presence_of_element_located((By.ID, "prodDetails")))
+        else:
+            wait_condition2 = (By.ID, "prodDetails")
+            load_flag2 = ParseData.init_web(driver, url, wait_condition2)
+            if load_flag2:
                 soup = BeautifulSoup(driver.page_source, 'html.parser')
                 info_section = soup.find('div', {'id': 'prodDetails'})
                 # 提取产品技术细节
@@ -385,8 +416,10 @@ class ParseData:
                         product_info['rank'] = rank_dict
                     elif key == 'Date First Available':
                         product_info['date'] = re.sub(r'[\u200e\u200f]', '', value)
-            except Exception as e:
-                print(e)
+            else:
+                print(f'Failed to retrieve information.')
+                print('-------------------------------')
+                print(url)
 
         def parse_pro_soldby(html_soup: BeautifulSoup):
             sold_by_div = html_soup.find('div', {'id': 'offerDisplayFeatures_desktop'})
@@ -398,10 +431,15 @@ class ParseData:
             product_info["soldby"] = "未获取到卖家信息"
         return product_info
 
+    @staticmethod
+    def parse_region_url(url):
+        match = re.match(r'(https?://[^/]+)', url)
+        base_url = match.group(0) if match else ""
+        return base_url
+
 
 class CsvOp:
-
-    @ staticmethod
+    @staticmethod
     def init_csv(filepath: str):
         # if os.path.exists(filename):
         #     print(f"{filename} already exists.")
@@ -434,6 +472,10 @@ class CsvOp:
                     writer.writerow(row_data)
             print(f"{second_category}-{third_category}-{min_category} saved to {csv_file} successfully.")
 
+    @staticmethod
+    def format_csv(csv_file):
+        pass
+
 
 class ConditionOp:
     @staticmethod
@@ -453,6 +495,7 @@ class ConditionOp:
         except Exception:
             return None
 
+    @staticmethod
     def check_date(product: dict, max_days):
         date_format = '%d %B %Y'
         date_str = product.get('date')
@@ -469,8 +512,9 @@ class ConditionOp:
         except ValueError:
             return None
 
+    @staticmethod
     def check_soldby(product: dict, soldby):
-        if product.get("soldby") and product.get("soldby").lower() == soldby.lower():
+        if product.get("soldby") and soldby.lower() in product.get("soldby").lower():
             return None
         return product
 
@@ -481,13 +525,11 @@ if __name__ == '__main__':
     csv_file = f'office_amazon_products_{now_str}.csv'
     pro_url = 'https://www.amazon.ae/gp/bestsellers/office-products/ref=zg_bs_nav_office-products_0'
     CsvOp.init_csv(csv_file)
-    main_driver = WebOp.init_driver()
-    WebOp.open_url(main_driver, pro_url)
-    second_category = ParseData.parse_second_category(main_driver, pro_url)
-    main_driver.quit()
+    driver = WebOp.init_driver()
+    second_category = ParseData.scrape_second_category(driver, pro_url)
+    driver.quit()
     # second = [{'category': 'Art & Craft Supplies', 'link': 'https://www.amazon.ae/gp/bestsellers/office-products/15172571031/ref=zg_bs_nav_office-products_1'}, {'category': 'Calendars, Planners & Personal Organizers', 'link': 'https://www.amazon.ae/gp/bestsellers/office-products/15172572031/ref=zg_bs_nav_office-products_1'}, {'category': 'Envelopes & Mailing Supplies', 'link': 'https://www.amazon.ae/gp/bestsellers/office-products/15172573031/ref=zg_bs_nav_office-products_1'}, {'category': 'Furniture & Lighting', 'link': 'https://www.amazon.ae/gp/bestsellers/office-products/15172574031/ref=zg_bs_nav_office-products_1'}, {'category': 'Office Electronics', 'link': 'https://www.amazon.ae/gp/bestsellers/office-products/15172575031/ref=zg_bs_nav_office-products_1'}, {'category': 'Office Paper Products', 'link': 'https://www.amazon.ae/gp/bestsellers/office-products/15172576031/ref=zg_bs_nav_office-products_1'}, {'category': 'Office Supplies', 'link': 'https://www.amazon.ae/gp/bestsellers/office-products/15172577031/ref=zg_bs_nav_office-products_1'}, {'category': 'Pens, Pencils & Writing Supplies', 'link': 'https://www.amazon.ae/gp/bestsellers/office-products/15172578031/ref=zg_bs_nav_office-products_1'}, {'category': 'School & Educational Supplies', 'link': 'https://www.amazon.ae/gp/bestsellers/office-products/15172579031/ref=zg_bs_nav_office-products_1'}]
 
-    # 获取 CPU 核心数
     cpu_count = multiprocessing.cpu_count()
     cpu_count = 1
     with multiprocessing.Pool(processes=cpu_count) as pool:
