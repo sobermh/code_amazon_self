@@ -234,7 +234,8 @@ class ParseData:
     @staticmethod
     def init_web(driver: webdriver.Chrome, url, wait_condition):
         WebOp.open_url(driver, url)
-        wait = WebDriverWait(driver, 5)
+        WebOp.load_html(driver)
+        wait = WebDriverWait(driver, 30)
         start_time = time.time()  # 记录开始时间
         flag = False
         while True:
@@ -248,7 +249,7 @@ class ParseData:
                 if ParseData.check_for_captcha(driver):
                     ParseData.valid_for_captcha(driver)
                 else:
-                    print("load page error")
+                    print(e)
                     print("********************")
                     print(url)
                     break
@@ -338,8 +339,7 @@ class ParseData:
         load_flag = ParseData.init_web(driver, url, wait_condition)
         if not load_flag:
             return [{}, ]
-        page_html = WebOp.load_html(driver)
-        soup = BeautifulSoup(page_html, 'html.parser')
+        soup = BeautifulSoup(driver.page_source, 'html.parser')
         pro1_list = parse_product(url, soup)
         # 可能没有下一页
         try:
@@ -358,7 +358,6 @@ class ParseData:
             'rank': '',
             "soldby": "",
         }
-        WebOp.load_html(driver)
         wait_condition = (By.ID, "ask-btf-container")
         load_flag = ParseData.init_web(driver, url, wait_condition)
         if not load_flag:
