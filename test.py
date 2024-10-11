@@ -3,18 +3,9 @@ from amazoncaptcha import AmazonCaptcha
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 
-driver = webdriver.Chrome()  # This is a simplified example
-driver.get('https://www.amazon.com/errors/validateCaptcha')
 
-captcha = AmazonCaptcha.fromdriver(driver)
-captcha = AmazonCaptcha.fromlink(captcha.image_link)
-solution = captcha.solve()
-print(solution)
-input_element = driver.find_element(By.ID, "captchacharacters")
-input_element.clear()
-input_element.send_keys(solution)
+for i in range(10):
+    driver = webdriver.Chrome()  # This is a simplified example
+    driver.get('https://www.amazon.ae/Itsy-Bitsy-Little-Birdie-Sculpture/dp/B082L3B9FM/ref=zg_bs_g_15194022031_d_sccl_28/261-3367906-9911827?psc=1')
 
-submit_button = driver.find_element(By.CLASS_NAME, "a-button-text")
-submit_button.click()
-
-time.sleep(5)
+    driver.quit()

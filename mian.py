@@ -35,7 +35,7 @@ def save_html(filepath, html):
 lock = multiprocessing.Lock()
 
 
-def process_second_category(i, csv_file):
+def process_second_category(i, csv_file, error_url_file):
     pro_driver = WebOp.init_driver()
     third_category = ParseData.scrape_third_category(pro_driver, i)
     for k in third_category:
@@ -60,7 +60,7 @@ def process_second_category(i, csv_file):
                 valid_price_value = ConditionOp.check_price(product, 50)
                 if valid_price_value is None:
                     continue
-                pro_info = ParseData.scrape_product_info(driver, valid_price_value["link"])
+                pro_info = ParseData.scrape_product_info(driver, valid_price_value["link"], error_url_file)
                 valid_price_value.update(pro_info)
                 valid_date_value = ConditionOp.check_date(valid_price_value, 180)
                 if valid_date_value is None:
@@ -260,9 +260,6 @@ class ParseData:
                     ParseData.valid_for_captcha(driver)
                 else:
                     print(e)
-                    print("page error")
-                    print('*******************************')
-                    print("url")
                     break
         return flag
 
@@ -363,14 +360,14 @@ class ParseData:
         return pro1_list + pro2_list
 
     @staticmethod
-    def scrape_product_info(driver: webdriver.Chrome, url):
-        WebOp.load_html(driver)
+    def scrape_product_info(driver: webdriver.Chrome, url,scrape_product_info):
         product_info = {
             'dimensions': '',
             'date': '',
             'rank': '',
             "soldby": "",
         }
+        WebOp.load_html(driver)
         wait_condition1 = (By.ID, "detailBullets_feature_div")
         load_flag1 = ParseData.init_web(driver, url, wait_condition1)
         if load_flag1:
@@ -417,9 +414,7 @@ class ParseData:
                     elif key == 'Date First Available':
                         product_info['date'] = re.sub(r'[\u200e\u200f]', '', value)
             else:
-                print(f'Failed to retrieve information.')
-                print('-------------------------------')
-                print(url)
+                CsvOp.write_error_url(error_url_file, url)
 
         def parse_pro_soldby(html_soup: BeautifulSoup):
             sold_by_div = html_soup.find('div', {'id': 'offerDisplayFeatures_desktop'})
@@ -440,14 +435,11 @@ class ParseData:
 
 class CsvOp:
     @staticmethod
-    def init_csv(filepath: str):
-        # if os.path.exists(filename):
-        #     print(f"{filename} already exists.")
-        #     return
+    def init_csv(filepath: str, rowddata):
+
         with open(filepath, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
-            writer.writerow(['二级类目', '三级类目', '最小类', '排名', '名称', '价格', '上架日期', '链接', '卖家'])
-        print(f"{filepath} created successfully.")
+            writer.writerow(rowddata)
 
     @staticmethod
     def save_to_csv(second_category, third_category, min_category, csv_file, data):
@@ -475,6 +467,13 @@ class CsvOp:
     @staticmethod
     def format_csv(csv_file):
         pass
+
+    @staticmethod
+    def write_error_url(error_url_file, url):
+        with lock:
+            with open(error_url_file, 'a') as f:
+                writer = csv.writer(f)
+                writer.writerow(url)
 
 
 class ConditionOp:
@@ -522,9 +521,12 @@ class ConditionOp:
 if __name__ == '__main__':
     start = time.time()
     now_str = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-    csv_file = f'office_amazon_products_{now_str}.csv'
+    data_file = f'office_amazon_products_{now_str}.csv'
+    error_url_file = f'error_url_{now_str}.csv'
     pro_url = 'https://www.amazon.ae/gp/bestsellers/office-products/ref=zg_bs_nav_office-products_0'
-    CsvOp.init_csv(csv_file)
+    init_csv_data = ['二级类目', '三级类目', '最小类', '排名', '名称', '价格', '上架日期', '链接', '卖家']
+    CsvOp.init_csv(data_file, init_csv_data)
+    CsvOp.init_csv(error_url_file, [])
     driver = WebOp.init_driver()
     second_category = ParseData.scrape_second_category(driver, pro_url)
     driver.quit()
@@ -533,7 +535,7 @@ if __name__ == '__main__':
     cpu_count = multiprocessing.cpu_count()
     cpu_count = 1
     with multiprocessing.Pool(processes=cpu_count) as pool:
-        pool.starmap(process_second_category, [(i, csv_file) for i in second_category[:1]])
+        pool.starmap(process_second_category, [(i, data_file, error_url_file) for i in second_category[:1]])
         # pool.starmap(process_second_category, [(i, csv_file) for i in second_category])
     end = time.time()
     print("Time taken:", end - start, "seconds")
