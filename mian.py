@@ -3,6 +3,7 @@ import csv
 import datetime
 import multiprocessing
 import os
+import queue
 import re
 import threading
 from amazoncaptcha import AmazonCaptcha
@@ -12,6 +13,8 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import NoSuchElementException, TimeoutException
+
 import time
 import random
 from bs4 import BeautifulSoup
@@ -35,59 +38,80 @@ def save_html(filepath, html):
 lock = multiprocessing.Lock()
 
 
-def process_second_category(i, csv_file, error_url_file):
-    pro_driver = WebOp.init_driver()
-    third_category = ParseData.scrape_third_category(pro_driver, i)
-    for k in third_category:
-        min_category = ParseData.scrape_min_category(pro_driver, k, third_category, i["category"])
-        threads = []
+class WebDriverPool:
+    def __init__(self, size):
+        self.size = size
+        self.driver_queue = queue.Queue()
+        for _ in range(size):
+            self.driver_queue.put(WebOp.init_driver())
+        self.executor = ThreadPoolExecutor(max_workers=size)
+
+    def submit(self, func, *args, **kwargs):
+        driver = self.driver_queue.get()
+        future = self.executor.submit(func, driver, *args, **kwargs)
+        # 当任务完成后，归还 WebDriver 到队列
+        future.add_done_callback(lambda _: self.driver_queue.put(driver))
+        return future
+
+    def shutdown(self):
+        while not self.driver_queue.empty():
+            driver = self.driver_queue.get_nowait()
+            driver.quit()
+        self.executor.shutdown()
+
+
+def process_second_category(second_category, csv_file, error_url_file):
+    driver = WebOp.init_driver()
+    third_categorys = ParseData.scrape_third_category(driver, second_category["link"])
+    driver.quit()
+
+    for third_category in third_categorys:
+        driver = WebOp.init_driver()
+        min_categorys = ParseData.scrape_min_category(
+            driver, third_category, third_categorys, second_category["category"])
+        driver.quit()
+
+        pool = WebDriverPool(10)  # 创建一个WebDriverPool实例
         products_list = []
 
-        def check_condition(driver: webdriver.Chrome, products):
+        def check_condition(driver: webdriver.Chrome, products, second_category, third_category, min_category):
             remian_products = []
             for product in products:
                 valid_price_value = ConditionOp.check_price(product, 50)
                 if valid_price_value is None:
                     continue
-                pro_info = ParseData.scrape_product_info(driver, valid_price_value["link"], error_url_file)
+                pro_info = ParseData.scrape_product_info(
+                    driver, valid_price_value["link"], error_url_file, second_category, third_category, min_category)
                 valid_price_value.update(pro_info)
                 valid_date_value = ConditionOp.check_date(valid_price_value, 180)
                 if valid_date_value is None:
                     continue
-                valid_soldby_value = ConditionOp.check_soldby(valid_date_value, "Amazon.ae")
+                valid_soldby_value = ConditionOp.check_soldby(valid_date_value, "Amazon")
                 if valid_soldby_value is None:
                     continue
                 remian_products.append(valid_soldby_value)
-                # remian_products.append(valid_price_value)
             return remian_products
-            # with ThreadPoolExecutor(max_workers=5) as executor:
-            #     futures = [executor.submit(process_product, product) for product in products]
-            #     for future in as_completed(futures):
-            #         result = future.result()
-            #         if result is not None:
-            #             remian_products.append(result)
-            # return remian_products
 
-        for j in min_category:
-            def selenium_task(category, url):
-                driver = WebOp.init_driver()
-                products = ParseData.scrape_products(driver, url)
-                valid_products = check_condition(driver, products)
-                products_list.append({category: valid_products})
-                driver.quit()
-            thread = threading.Thread(target=selenium_task, args=(j["category"], j['link'],))
-            threads.append(thread)
-            thread.start()
+        def selenium_task(driver, category, url, second_category, third_category, min_category):
+            products = ParseData.scrape_products(driver, url)
+            valid_products = check_condition(driver, products, second_category, third_category, min_category)
+            products_list.append({category: valid_products})
 
-        for thread in threads:
-            thread.join()
+        futures = []
+        for min_category in min_categorys:
+            # print(min_category)
+            future = pool.submit(
+                selenium_task, min_category["category"], min_category['link'], second_category["category"], third_category["category"], min_category["category"])
+            futures.append(future)
+
+        for future in futures:
+            future.result()  # 等待任务完成
+
+        pool.shutdown()  # 关闭所有的WebDriver实例
 
         for c in products_list:
             for key, value in c.items():
-                CsvOp.save_to_csv(i["category"], k["category"], key, csv_file, value)
-
-        # break
-    pro_driver.quit()
+                CsvOp.save_to_csv(second_category["category"], third_category["category"], key, csv_file, value)
 
 
 class WebOp:
@@ -185,22 +209,27 @@ class WebOp:
     def load_html(driver: webdriver.Chrome):
         # 定义滚动的暂停时间
         # scroll_pause_time = 1
-        flag = 10
-        while True:
-            # 获取当前滚动位置和页面高度
-            scroll_height = driver.execute_script("return document.body.scrollHeight")
-            window_height = driver.execute_script("return window.innerHeight")
-            scroll_position = driver.execute_script("return window.scrollY")
+        try:
+            flag = 10
+            while True:
+                # 获取当前滚动位置和页面高度
+                scroll_height = driver.execute_script("return document.body.scrollHeight")
+                window_height = driver.execute_script("return window.innerHeight")
+                scroll_position = driver.execute_script("return window.scrollY")
 
-            # 判断是否已经滚动到页面底部
-            if scroll_position + window_height < scroll_height:
-                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(0.5)
-            else:
-                break
-            flag -= 1
-            if flag == 0:
-                break
+                # 判断是否已经滚动到页面底部
+                if scroll_position + window_height < scroll_height:
+                    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                    time.sleep(0.5)
+                else:
+                    break
+                flag -= 1
+                if flag == 0:
+                    print("---------------------")
+                    print("未加载页面完全.")
+        except:
+            print("---------------------")
+            return driver.page_source
         return driver.page_source
 
     @staticmethod
@@ -234,27 +263,33 @@ class ParseData:
         submit_button.click()
 
     @staticmethod
-    def init_web(driver: webdriver.Chrome, url, wait_condition):
+    def init_web(driver: webdriver.Chrome, url, wait_condition: tuple):
         WebOp.open_url(driver, url)
         WebOp.load_html(driver)
-        wait = WebDriverWait(driver, 30)
+        wait = WebDriverWait(driver, 20)
         start_time = time.time()  # 记录开始时间
         flag = False
         while True:
-            if time.time() - start_time > 30:  # 如果已经超过30秒，就跳出循环
+            if time.time() - start_time > 120:  # 如果已经超过60秒，就跳出循环
+                print("********************")
+                print(url)
                 break
             try:
-                wait.until(EC.presence_of_element_located((wait_condition)))
+                wait.until(EC.presence_of_element_located(wait_condition))
+                element = driver.find_element(*wait_condition)
                 flag = True
                 break
-            except Exception as e:
+            except NoSuchElementException as e:
                 if ParseData.check_for_captcha(driver):
                     ParseData.valid_for_captcha(driver)
                 else:
-                    print(e)
-                    print("********************")
-                    print(url)
-                    break
+                    print("---------------------")
+                    print("Timeout waiting for element to be present.")
+            except TimeoutException as e:
+                # print(e)
+                pass
+                # print("********************")
+                # print(url)
         return flag
 
     @staticmethod
@@ -275,9 +310,9 @@ class ParseData:
         return category_list
 
     @staticmethod
-    def scrape_third_category(driver: webdriver.Chrome, i):
+    def scrape_third_category(driver: webdriver.Chrome, second_category_url):
         wait_condition = (By.ID, "zg-left-col")
-        ParseData.init_web(driver, i["link"], wait_condition)
+        ParseData.init_web(driver, second_category_url, wait_condition)
         category_list = []
         soup = BeautifulSoup(driver.page_source, 'html.parser')
         category_html = soup.select(
@@ -287,15 +322,15 @@ class ParseData:
             if link_tag:
                 category_name = link_tag.text.strip()
                 category_link = link_tag['href']
-                base_url = ParseData.parse_region_url(i["link"])
+                base_url = ParseData.parse_region_url(second_category_url)
                 category_list.append({'category': category_name, 'link': base_url+category_link})
         third_category = category_list[1:]
         return third_category
 
     @staticmethod
-    def scrape_min_category(driver: webdriver.Chrome, k, third_categorys, second_category):
+    def scrape_min_category(driver: webdriver.Chrome, third_category, third_categorys, second_category):
         wait_condition = (By.ID, "zg-left-col")
-        ParseData.init_web(driver, k['link'], wait_condition)
+        ParseData.init_web(driver, third_category['link'], wait_condition)
         category_list = []
         soup = BeautifulSoup(driver.page_source, 'html.parser')
         category_html = soup.select(
@@ -305,15 +340,15 @@ class ParseData:
             if link_tag:
                 category_name = link_tag.text.strip()
                 category_link = link_tag['href']
-                base_url = ParseData.parse_region_url(k['link'])
+                base_url = ParseData.parse_region_url(third_category['link'])
                 category_list.append({'category': category_name, 'link': base_url+category_link})
         category = [item["category"] for item in category_list]
         third_category = [item["category"] for item in third_categorys]
         if set(category[1:]) == set(third_category):
-            min_category = [k]
+            min_category = [third_category]
         else:
             if category[1] != second_category:
-                min_category = [k]
+                min_category = [third_category]
             else:
                 min_category = category_list[2:]
         return min_category
@@ -322,7 +357,7 @@ class ParseData:
     def scrape_products(driver: webdriver.Chrome, url):
         def parse_product(url, soup_html, start_index=0):
             base_url = ParseData.parse_region_url(url)
-            product_html = soup_html.select("#gridItemRoot")  # 根据实际的类名调整选择器
+            product_html = soup_html.select("#gridItemRoot")
             product_list = []
             for index, product in enumerate(product_html):
                 try:
@@ -353,7 +388,7 @@ class ParseData:
         return pro1_list + pro2_list
 
     @staticmethod
-    def scrape_product_info(driver: webdriver.Chrome, url, error_url_file):
+    def scrape_product_info(driver: webdriver.Chrome, url, error_url_file, second_category, third_category, min_category):
         product_info = {
             'dimensions': '',
             'date': '',
@@ -408,7 +443,7 @@ class ParseData:
                             product_info['date'] = re.sub(r'[\u200e\u200f]', '', value)
                 except Exception as e:
                     print(e)
-                    CsvOp.write_error_url(error_url_file, [url])
+                    CsvOp.write_error_url(error_url_file, [url], second_category, third_category, min_category)
 
         def parse_pro_soldby(html_soup: BeautifulSoup):
             sold_by_div = html_soup.find('div', {'id': 'offerDisplayFeatures_desktop'})
@@ -463,11 +498,11 @@ class CsvOp:
         pass
 
     @staticmethod
-    def write_error_url(error_url_file, url):
+    def write_error_url(error_url_file, url, second_category, third_category, min_category):
         with lock:
             with open(error_url_file, 'a') as f:
                 writer = csv.writer(f)
-                writer.writerow(url)
+                writer.writerow(second_category, third_category, min_category, url)
 
 
 class ConditionOp:
@@ -507,7 +542,7 @@ class ConditionOp:
 
     @staticmethod
     def check_soldby(product: dict, soldby):
-        if product.get("soldby") and soldby.lower() in product.get("soldby").lower():
+        if product.get("soldby") and (soldby.lower() in product.get("soldby").lower()):
             return None
         return product
 
@@ -515,24 +550,24 @@ class ConditionOp:
 if __name__ == '__main__':
     start = time.time()
     now_str = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-    data_file = f'office_amazon_products_{now_str}.csv'
-    error_url_file = f'error_url_{now_str}.csv'
+    filename = f'ae_office_products_{now_str}'
+    pro_file = f'{filename}.csv'
+    error_pro_file = f'{filename}_error.csv'
     pro_url = 'https://www.amazon.ae/gp/bestsellers/office-products/ref=zg_bs_nav_office-products_0'
-    init_csv_data = ['二级类目', '三级类目', '最小类', '排名', '名称', '价格', '上架日期', '链接', '卖家']
-    CsvOp.init_csv(data_file, init_csv_data)
-    CsvOp.init_csv(error_url_file, [])
+    init_pro_file = ['二级类目', '三级类目', '最小类', '排名', '名称', '价格', '上架日期', '链接', '卖家']
+    init_error_pro_file = ['二级类目', '三级类目', '最小类', '链接']
+    CsvOp.init_csv(pro_file, init_pro_file)
+    CsvOp.init_csv(error_pro_file, init_error_pro_file)
     driver = WebOp.init_driver()
-    second_category = ParseData.scrape_second_category(driver, pro_url)
+    second_categorys = ParseData.scrape_second_category(driver, pro_url)
     driver.quit()
     # second = [{'category': 'Art & Craft Supplies', 'link': 'https://www.amazon.ae/gp/bestsellers/office-products/15172571031/ref=zg_bs_nav_office-products_1'}, {'category': 'Calendars, Planners & Personal Organizers', 'link': 'https://www.amazon.ae/gp/bestsellers/office-products/15172572031/ref=zg_bs_nav_office-products_1'}, {'category': 'Envelopes & Mailing Supplies', 'link': 'https://www.amazon.ae/gp/bestsellers/office-products/15172573031/ref=zg_bs_nav_office-products_1'}, {'category': 'Furniture & Lighting', 'link': 'https://www.amazon.ae/gp/bestsellers/office-products/15172574031/ref=zg_bs_nav_office-products_1'}, {'category': 'Office Electronics', 'link': 'https://www.amazon.ae/gp/bestsellers/office-products/15172575031/ref=zg_bs_nav_office-products_1'}, {'category': 'Office Paper Products', 'link': 'https://www.amazon.ae/gp/bestsellers/office-products/15172576031/ref=zg_bs_nav_office-products_1'}, {'category': 'Office Supplies', 'link': 'https://www.amazon.ae/gp/bestsellers/office-products/15172577031/ref=zg_bs_nav_office-products_1'}, {'category': 'Pens, Pencils & Writing Supplies', 'link': 'https://www.amazon.ae/gp/bestsellers/office-products/15172578031/ref=zg_bs_nav_office-products_1'}, {'category': 'School & Educational Supplies', 'link': 'https://www.amazon.ae/gp/bestsellers/office-products/15172579031/ref=zg_bs_nav_office-products_1'}]
 
     cpu_count = multiprocessing.cpu_count()
     cpu_count = 1
     with multiprocessing.Pool(processes=cpu_count) as pool:
-        pool.starmap(process_second_category, [(i, data_file, error_url_file) for i in second_category[:1]])
+        pool.starmap(process_second_category, [(second_category, pro_file, error_pro_file)
+                     for second_category in second_categorys[:1]])
         # pool.starmap(process_second_category, [(i, csv_file) for i in second_category])
     end = time.time()
     print("Time taken:", end - start, "seconds")
-
-    # url = "https://www.amazon.ae/Montchi-Stickers-Motivational-Holographic-Classroom/dp/B0D4VJP48L/ref=zg_bs_g_15172571031_d_sccl_1/262-9087435-0427238?th=1"
-    # print(parse_product_info(url))
