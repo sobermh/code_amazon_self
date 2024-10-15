@@ -270,7 +270,7 @@ class ParseData:
         start_time = time.time()  # 记录开始时间
         flag = False
         while True:
-            if time.time() - start_time > 120:  # 如果已经超过60秒，就跳出循环
+            if time.time() - start_time > 200:  # 如果已经超过60秒，就跳出循环
                 print("********************")
                 print(url)
                 break
