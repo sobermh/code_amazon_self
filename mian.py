@@ -60,7 +60,8 @@ class WebDriverPool:
         self.executor.shutdown()
 
 
-def process_second_category(second_category, csv_file, error_url_file):
+def process_second_category(second_category):
+    pro_file, error_pro_file = init_file(second_category["category"])
     driver = WebOp.init_driver()
     third_categorys = ParseData.scrape_third_category(driver, second_category["link"])
     driver.quit()
@@ -81,7 +82,7 @@ def process_second_category(second_category, csv_file, error_url_file):
                 if valid_price_value is None:
                     continue
                 pro_info = ParseData.scrape_product_info(
-                    driver, valid_price_value["link"], error_url_file, second_category, third_category, min_category)
+                    driver, valid_price_value["link"], error_pro_file, second_category, third_category, min_category)
                 valid_price_value.update(pro_info)
                 valid_date_value = ConditionOp.check_date(valid_price_value, 180)
                 if valid_date_value is None:
@@ -111,7 +112,7 @@ def process_second_category(second_category, csv_file, error_url_file):
 
         for c in products_list:
             for key, value in c.items():
-                CsvOp.save_to_csv(second_category["category"], third_category["category"], key, csv_file, value)
+                CsvOp.save_to_csv(second_category["category"], third_category["category"], key, pro_file, value)
 
 
 class WebOp:
@@ -209,27 +210,26 @@ class WebOp:
     def load_html(driver: webdriver.Chrome):
         # 定义滚动的暂停时间
         # scroll_pause_time = 1
-        try:
-            flag = 10
-            while True:
-                # 获取当前滚动位置和页面高度
-                scroll_height = driver.execute_script("return document.body.scrollHeight")
-                window_height = driver.execute_script("return window.innerHeight")
-                scroll_position = driver.execute_script("return window.scrollY")
+        max_scroll_times = 10
+        scroll_height = 800  # 可以根据实际情况调整
 
-                # 判断是否已经滚动到页面底部
-                if scroll_position + window_height < scroll_height:
-                    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                    time.sleep(0.5)
-                else:
-                    break
-                flag -= 1
-                if flag == 0:
-                    print("---------------------")
-                    print("未加载页面完全.")
-        except:
-            print("---------------------")
-            return driver.page_source
+        for i in range(max_scroll_times):
+            # 计算下一个滚动的目标位置
+            target_position = scroll_height * (i + 1)
+
+            # 滚动到下一个位置
+            driver.execute_script(f"window.scrollTo(0, {target_position});")
+
+            # 等待内容加载
+            time.sleep(0.5)  # 可以根据实际情况调整等待时间
+
+            # 检查是否已经滚动到底部
+            # scroll_position = driver.execute_script("return window.pageYOffset;")
+            # total_height = driver.execute_script("return document.body.scrollHeight;")
+            # window_height = driver.execute_script("return window.innerHeight;")
+            # if scroll_position + window_height >= total_height:
+            #     # 已经滚动到底部，退出循环
+            #     break
         return driver.page_source
 
     @staticmethod
@@ -265,31 +265,26 @@ class ParseData:
     @staticmethod
     def init_web(driver: webdriver.Chrome, url, wait_condition: tuple):
         WebOp.open_url(driver, url)
-        WebOp.load_html(driver)
-        wait = WebDriverWait(driver, 20)
+        wait = WebDriverWait(driver, 5)
         start_time = time.time()  # 记录开始时间
         flag = False
         while True:
-            if time.time() - start_time > 200:  # 如果已经超过60秒，就跳出循环
+            WebOp.load_html(driver)
+            if time.time() - start_time > 60:  # 如果已经超过60秒，就跳出循环
                 print("********************")
                 print(url)
                 break
             try:
                 wait.until(EC.presence_of_element_located(wait_condition))
-                element = driver.find_element(*wait_condition)
+                # element = driver.find_element(*wait_condition)
                 flag = True
                 break
-            except NoSuchElementException as e:
+            except Exception as e:
                 if ParseData.check_for_captcha(driver):
                     ParseData.valid_for_captcha(driver)
-                else:
-                    print("---------------------")
-                    print("Timeout waiting for element to be present.")
-            except TimeoutException as e:
-                # print(e)
-                pass
-                # print("********************")
-                # print(url)
+                # else:
+                #     print("---------------------")
+                #     print("Timeout waiting for element to be present.")
         return flag
 
     @staticmethod
@@ -388,7 +383,7 @@ class ParseData:
         return pro1_list + pro2_list
 
     @staticmethod
-    def scrape_product_info(driver: webdriver.Chrome, url, error_url_file, second_category, third_category, min_category):
+    def scrape_product_info(driver: webdriver.Chrome, url, error_pro_file, second_category, third_category, min_category):
         product_info = {
             'dimensions': '',
             'date': '',
@@ -402,7 +397,7 @@ class ParseData:
         else:
             try:
                 soup = BeautifulSoup(driver.page_source, 'html.parser')
-                info_section = soup.find('div', {'id': 'detailBullets_feature_div'})
+                info_section = soup.find('div', {'id': 'detailBulletsWrapper_feature_div'})
                 info_section2 = soup.find_all(
                     'ul', {'class': 'a-unordered-list a-nostyle a-vertical a-spacing-none detail-bullet-list'})[1]
                 for li in info_section.find_all('li'):
@@ -443,7 +438,7 @@ class ParseData:
                             product_info['date'] = re.sub(r'[\u200e\u200f]', '', value)
                 except Exception as e:
                     print(e)
-                    CsvOp.write_error_url(error_url_file, [url], second_category, third_category, min_category)
+                    CsvOp.write_error_url(error_pro_file, url, second_category, third_category, min_category)
 
         def parse_pro_soldby(html_soup: BeautifulSoup):
             sold_by_div = html_soup.find('div', {'id': 'offerDisplayFeatures_desktop'})
@@ -453,6 +448,7 @@ class ParseData:
             product_info["soldby"] = parse_pro_soldby(soup)
         except Exception:
             product_info["soldby"] = "未获取到卖家信息"
+        print(product_info)
         return product_info
 
     @staticmethod
@@ -471,9 +467,9 @@ class CsvOp:
             writer.writerow(rowddata)
 
     @staticmethod
-    def save_to_csv(second_category, third_category, min_category, csv_file, data):
+    def save_to_csv(second_category, third_category, min_category, pro_file, data):
         with lock:
-            with open(csv_file, 'a', newline='', encoding='utf-8') as f:
+            with open(pro_file, 'a', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
                 for item in data:
                     row_data = [second_category, third_category, min_category]
@@ -491,18 +487,18 @@ class CsvOp:
                         elif key == "soldby":
                             row_data.insert(8, value)
                     writer.writerow(row_data)
-            print(f"{second_category}-{third_category}-{min_category} saved to {csv_file} successfully.")
+            print(f"{second_category}-{third_category}-{min_category} saved to {pro_file} successfully.")
 
     @staticmethod
-    def format_csv(csv_file):
+    def format_csv(pro_file):
         pass
 
     @staticmethod
-    def write_error_url(error_url_file, url, second_category, third_category, min_category):
+    def write_error_url(error_pro_file, url, second_category, third_category, min_category):
         with lock:
-            with open(error_url_file, 'a') as f:
+            with open(error_pro_file, 'a', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
-                writer.writerow(second_category, third_category, min_category, url)
+                writer.writerow([second_category, third_category, min_category, url])
 
 
 class ConditionOp:
@@ -547,17 +543,21 @@ class ConditionOp:
         return product
 
 
-if __name__ == '__main__':
-    start = time.time()
+def init_file(second_category):
     now_str = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-    filename = f'ae_office_products_{now_str}'
+    filename = f'ae_office_products_{second_category}_{now_str}'
     pro_file = f'{filename}.csv'
     error_pro_file = f'{filename}_error.csv'
-    pro_url = 'https://www.amazon.ae/gp/bestsellers/office-products/ref=zg_bs_nav_office-products_0'
     init_pro_file = ['二级类目', '三级类目', '最小类', '排名', '名称', '价格', '上架日期', '链接', '卖家']
     init_error_pro_file = ['二级类目', '三级类目', '最小类', '链接']
     CsvOp.init_csv(pro_file, init_pro_file)
     CsvOp.init_csv(error_pro_file, init_error_pro_file)
+    return pro_file, error_pro_file
+
+
+if __name__ == '__main__':
+    start = time.time()
+    pro_url = 'https://www.amazon.ae/gp/bestsellers/office-products/ref=zg_bs_nav_office-products_0'
     driver = WebOp.init_driver()
     second_categorys = ParseData.scrape_second_category(driver, pro_url)
     driver.quit()
@@ -566,8 +566,12 @@ if __name__ == '__main__':
     cpu_count = multiprocessing.cpu_count()
     cpu_count = 1
     with multiprocessing.Pool(processes=cpu_count) as pool:
-        pool.starmap(process_second_category, [(second_category, pro_file, error_pro_file)
-                     for second_category in second_categorys[:1]])
-        # pool.starmap(process_second_category, [(i, csv_file) for i in second_category])
+        pool.starmap(process_second_category, [(second_category, )for second_category in second_categorys[:1]])
+        # pool.starmap(process_second_category, [(i, pro_file) for i in second_category])
     end = time.time()
     print("Time taken:", end - start, "seconds")
+
+    # driver = WebOp.init_driver()
+    # ParseData.scrape_product_info(
+    #     driver, "https://www.amazon.ae/Loctite-1360694-Plastic-Adhesive-Multicolor/dp/B001F7E9VI/ref=zg_bs_g_15194024031_d_sccl_15/261-6336418-8804356?th=1", "", "", "", "")
+    # driver.quit()
