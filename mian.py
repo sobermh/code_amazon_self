@@ -105,8 +105,11 @@ def process_second_category(second_category):
                 selenium_task, min_category["category"], min_category['link'], second_category["category"], third_category["category"], min_category["category"])
             futures.append(future)
 
-        for future in futures:
-            future.result()  # 等待任务完成
+        try:
+            for future in futures:
+                future.result()  # 等待任务完成
+        except Exception as e:
+            print(e)
 
         pool.shutdown()  # 关闭所有的WebDriver实例
 
@@ -168,11 +171,13 @@ class WebOp:
         options.add_argument("--lang=zh-CN")  # 添加此行以设置默认语言为中文
         chrome_driver_path = Service(r"chromedriver.exe")  # 替换为你本地 ChromeDriver 的路径
 
+        prefs = {"profile.managed_default_content_settings.images": 2}
+        options.add_experimental_option("prefs", prefs)
+        
         # 选择可用的代理服务器
         options.add_argument(f'user-agent={random.choice(user_agents)}')
-        # proxy = "http://127.0.0.1:8890"  # home
-        proxy = "http://127.0.0.1:7890"  # ver
-        options.add_argument(f'--proxy-server={proxy}')
+        # proxy = "http://127.0.0.1:7890"
+        # options.add_argument(f'--proxy-server={proxy}')
         while True:
             try:
                 driver = webdriver.Chrome(service=chrome_driver_path, options=options)
@@ -211,7 +216,7 @@ class WebOp:
         # 定义滚动的暂停时间
         # scroll_pause_time = 1
         max_scroll_times = 10
-        scroll_height = 800  # 可以根据实际情况调整
+        scroll_height = 600  # 可以根据实际情况调整
 
         for i in range(max_scroll_times):
             # 计算下一个滚动的目标位置
@@ -221,7 +226,7 @@ class WebOp:
             driver.execute_script(f"window.scrollTo(0, {target_position});")
 
             # 等待内容加载
-            time.sleep(0.5)  # 可以根据实际情况调整等待时间
+            time.sleep(1)  # 可以根据实际情况调整等待时间
 
             # 检查是否已经滚动到底部
             # scroll_position = driver.execute_script("return window.pageYOffset;")
@@ -270,7 +275,7 @@ class ParseData:
         flag = False
         while True:
             WebOp.load_html(driver)
-            if time.time() - start_time > 60:  # 如果已经超过60秒，就跳出循环
+            if time.time() - start_time > 25:  # 如果已经超过60秒，就跳出循环
                 print("********************")
                 print(url)
                 break
@@ -397,45 +402,45 @@ class ParseData:
         else:
             try:
                 soup = BeautifulSoup(driver.page_source, 'html.parser')
-                info_section = soup.find('div', {'id': 'detailBulletsWrapper_feature_div'})
-                info_section2 = soup.find_all(
-                    'ul', {'class': 'a-unordered-list a-nostyle a-vertical a-spacing-none detail-bullet-list'})[1]
-                for li in info_section.find_all('li'):
-                    text = li.get_text(strip=True)
-                    if 'Product Dimensions' in text:
-                        product_info['dimensions'] = re.sub(r'[\u200e\u200f]', '', text.split(':')[-1].strip())
-                    elif 'Date First Available' in text:
-                        product_info['date'] = re.sub(r'[\u200e\u200f]', '', text.split(':')[-1].strip())
-                for li in info_section2.find_all('li'):
-                    text = li.get_text(strip=True)
-                    if 'Best Sellers Rank' in text:
-                        ranks = re.findall(r'#(\d+)\s+in\s*([A-Za-z\s]+)',
-                                           re.sub(r'[\u200e\u200f]', '', text.split(':')[-1].strip()))
-                        rank_dict = {category.strip(): rank for rank, category in ranks}
+                info_section = soup.find('div', {'id': 'prodDetails'})
+                # 提取产品技术细节
+                tech_table = info_section.find('table', {'id': 'productDetails_techSpec_section_1'})
+                for row in tech_table.find_all('tr'):
+                    key = row.find('th').get_text(strip=True)
+                    value = row.find('td').get_text(strip=True)
+                    if key == 'Product Dimensions':
+                        product_info['dimensions'] = re.sub(r'[\u200e\u200f]', '', value)
+                # 提取附加信息
+                additional_table = info_section.find('table', {'id': 'productDetails_detailBullets_sections1'})
+                for row in additional_table.find_all('tr'):
+                    key = row.find('th').get_text(strip=True)
+                    value = row.find('td').get_text(strip=True)
+                    if key == 'Best Sellers Rank':
+                        anks = re.findall(r'#(\d+)\s+in\s*([A-Za-z\s]+)',
+                                            re.sub(r'[\u200e\u200f]', '', value))
+                        rank_dict = {category.strip(): rank for rank, category in anks}
                         product_info['rank'] = rank_dict
+                    elif key == 'Date First Available':
+                        product_info['date'] = re.sub(r'[\u200e\u200f]', '', value)
             except Exception as e:
                 try:
                     soup = BeautifulSoup(driver.page_source, 'html.parser')
-                    info_section = soup.find('div', {'id': 'prodDetails'})
-                    # 提取产品技术细节
-                    tech_table = info_section.find('table', {'id': 'productDetails_techSpec_section_1'})
-                    for row in tech_table.find_all('tr'):
-                        key = row.find('th').get_text(strip=True)
-                        value = row.find('td').get_text(strip=True)
-                        if key == 'Product Dimensions':
-                            product_info['dimensions'] = re.sub(r'[\u200e\u200f]', '', value)
-                    # 提取附加信息
-                    additional_table = info_section.find('table', {'id': 'productDetails_detailBullets_sections1'})
-                    for row in additional_table.find_all('tr'):
-                        key = row.find('th').get_text(strip=True)
-                        value = row.find('td').get_text(strip=True)
-                        if key == 'Best Sellers Rank':
-                            anks = re.findall(r'#(\d+)\s+in\s*([A-Za-z\s]+)',
-                                              re.sub(r'[\u200e\u200f]', '', value))
-                            rank_dict = {category.strip(): rank for rank, category in anks}
+                    info_section = soup.find('div', {'id': 'detailBulletsWrapper_feature_div'})
+                    info_section2 = soup.find_all(
+                        'ul', {'class': 'a-unordered-list a-nostyle a-vertical a-spacing-none detail-bullet-list'})[1]
+                    for li in info_section.find_all('li'):
+                        text = li.get_text(strip=True)
+                        if 'Product Dimensions' in text:
+                            product_info['dimensions'] = re.sub(r'[\u200e\u200f]', '', text.split(':')[-1].strip())
+                        elif 'Date First Available' in text:
+                            product_info['date'] = re.sub(r'[\u200e\u200f]', '', text.split(':')[-1].strip())
+                    for li in info_section2.find_all('li'):
+                        text = li.get_text(strip=True)
+                        if 'Best Sellers Rank' in text:
+                            ranks = re.findall(r'#(\d+)\s+in\s*([A-Za-z\s]+)',
+                                            re.sub(r'[\u200e\u200f]', '', text.split(':')[-1].strip()))
+                            rank_dict = {category.strip(): rank for rank, category in ranks}
                             product_info['rank'] = rank_dict
-                        elif key == 'Date First Available':
-                            product_info['date'] = re.sub(r'[\u200e\u200f]', '', value)
                 except Exception as e:
                     print(e)
                     CsvOp.write_error_url(error_pro_file, url, second_category, third_category, min_category)
