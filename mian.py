@@ -1,6 +1,7 @@
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 import csv
 import datetime
+from functools import partial
 import multiprocessing
 import os
 import queue
@@ -60,7 +61,7 @@ class WebDriverPool:
         self.executor.shutdown()
 
 
-def process_second_category(second_category,pro_file,error_pro_file):
+def process_second_category(second_category, pro_file, error_pro_file,max_category):
     driver = WebOp.init_driver()
     third_categorys = ParseData.scrape_third_category(driver, second_category["link"])
     driver.quit()
@@ -81,7 +82,7 @@ def process_second_category(second_category,pro_file,error_pro_file):
                 if valid_price_value is None:
                     continue
                 pro_info = ParseData.scrape_product_info(
-                    driver, valid_price_value["link"], error_pro_file, second_category, third_category, min_category)
+                    driver, valid_price_value["link"], error_pro_file, second_category, third_category, min_category,max_category)
                 valid_price_value.update(pro_info)
                 valid_date_value = ConditionOp.check_date(valid_price_value, 180)
                 if valid_date_value is None:
@@ -89,7 +90,10 @@ def process_second_category(second_category,pro_file,error_pro_file):
                 valid_soldby_value = ConditionOp.check_soldby(valid_date_value, "Amazon")
                 if valid_soldby_value is None:
                     continue
-                remian_products.append(valid_soldby_value)
+                valid_rank_value = ConditionOp.check_rank(valid_soldby_value, 10000)
+                if valid_rank_value is None:
+                    continue
+                remian_products.append(valid_rank_value)
             return remian_products
 
         def selenium_task(driver, category, url, second_category, third_category, min_category):
@@ -107,9 +111,8 @@ def process_second_category(second_category,pro_file,error_pro_file):
             except Exception as e:
                 with lock:
                     with open("error", "a+", encoding="utf-8") as f:
-                        f.write(str(min_category) +"\n")
+                        f.write(str(min_category) + "\n")
                         f.write(f"{e}\n")
-                    
 
         try:
             for future in futures:
@@ -232,7 +235,7 @@ class WebOp:
             driver.execute_script(f"window.scrollTo(0, {target_position});")
 
             # 等待内容加载
-            time.sleep(1)  # 可以根据实际情况调整等待时间
+            time.sleep(0.5)  # 可以根据实际情况调整等待时间
 
             # 检查是否已经滚动到底部
             # scroll_position = driver.execute_script("return window.pageYOffset;")
@@ -299,7 +302,8 @@ class ParseData:
 
         WebOp.load_html(driver)
         try:
-            wait.until(EC.presence_of_element_located(wait_condition))
+            # wait.until(EC.presence_of_element_located(wait_condition))
+            wait.until(EC.visibility_of_element_located(wait_condition))
         except Exception as e:
             if ParseData.check_for_captcha(driver):
                 ParseData.valid_for_captcha(driver)
@@ -357,8 +361,8 @@ class ParseData:
                 base_url = ParseData.parse_region_url(third_category['link'])
                 category_list.append({'category': category_name, 'link': base_url+category_link})
         category = [item["category"] for item in category_list]
-        third_category_list  = [item["category"] for item in third_categorys]
-        if set(category[1:]) == set(third_category_list ):
+        third_category_list = [item["category"] for item in third_categorys]
+        if set(category[1:]) == set(third_category_list):
             min_category = [third_category_list]
         else:
             if category[1] != second_category:
@@ -403,7 +407,7 @@ class ParseData:
             return [{}]
 
     @staticmethod
-    def scrape_product_info(driver: webdriver.Chrome, url, error_pro_file, second_category, third_category, min_category, max_category="Office Products"):
+    def scrape_product_info(driver: webdriver.Chrome, url, error_pro_file, second_category, third_category, min_category, max_category):
         product_info = {
             'dimensions': '',
             'date': '',
@@ -411,8 +415,8 @@ class ParseData:
             "soldby": "",
         }
         flag = 0
-        for i in range(3):
-            flag +=1
+        for i in range(1):
+            flag += 1
             wait_condition = (By.ID, "ask-btf-container")
             ParseData.init_web(driver, url, wait_condition)
             try:
@@ -434,7 +438,7 @@ class ParseData:
                         # 移除 Unicode 控制字符
                         clean_value = re.sub(r'[\u200e\u200f]', '', value)
                         # 正则表达式匹配前的数字
-                        match = re.search(fr'#([\d,]+)\s+in\s*{max_category}', clean_value)
+                        match = re.search(fr'#([\d,]+)\s*in\s*{max_category}', clean_value)
                         # 如果匹配成功，提取数字，否则返回0
                         if match:
                             # 将逗号去掉后转换为整数
@@ -443,7 +447,7 @@ class ParseData:
                             except:
                                 number = -1
                         else:
-                            number = 0
+                            number = clean_value if clean_value else 0
                         product_info['rank'] = number
                     elif key == 'Date First Available':
                         product_info['date'] = re.sub(r'[\u200e\u200f]', '', value)
@@ -463,9 +467,9 @@ class ParseData:
                         text = li.get_text(strip=True)
                         if 'Best Sellers Rank' in text:
                             ranks = re.findall(r'#(\d+)\s+in\s*([A-Za-z\s]+)',
-                                            re.sub(r'[\u200e\u200f]', '', text.split(':')[-1].strip()))
+                                               re.sub(r'[\u200e\u200f]', '', text.split(':')[-1].strip()))
                             rank_dict = {category.strip(): rank for rank, category in ranks}
-                            product_info['rank'] = rank_dict.get(max_category,0)
+                            product_info['rank'] = rank_dict.get(max_category, 0)
                 except Exception as e:
                     pass
 
@@ -477,22 +481,34 @@ class ParseData:
                 product_info["soldby"] = parse_pro_soldby(soup)
             except Exception:
                 product_info["soldby"] = "未获取到卖家信息"
-            
-            if product_info["date"] == "":
-                if flag == 3:
+
+            def parse_pro_price(html_soup: BeautifulSoup):
+                sold_by_div = html_soup.find('div', {'id': 'corePriceDisplay_desktop_feature_div'})
+                sold_by_span = sold_by_div.find('span', {'class': 'a-price-whole'})
+                price_text = sold_by_span.text
+                price_numbers = re.sub(r'\D', '', price_text)  # 只保留数字，移除非数字字符
+                return price_numbers
+            try:
+                product_info["price"] = parse_pro_price(soup)
+            except Exception:
+                pass
+
+            def parse_pro_title(html_soup: BeautifulSoup):
+                title_div = html_soup.find('div', {'id': 'titleSection'})
+                title_span = title_div.find('span', {'id': 'productTitle'})
+                return title_span.text.strip()
+            try:
+                product_info["title"] = parse_pro_title(soup)
+            except Exception:
+                pass
+
+            if product_info["date"] == "" and product_info["rank"] == "":
+                if flag == 1:
                     valid_soldby_value = ConditionOp.check_soldby(product_info, "Amazon")
                     if valid_soldby_value is None:
                         break
                     else:
                         CsvOp.write_error_url(error_pro_file, url, second_category, third_category, min_category)
-                        break
-                if product_info["date"] != '':
-                    valid_date_value = ConditionOp.check_date(product_info, 180)
-                    if valid_date_value is None:
-                        break
-                if product_info["soldby"] != "未获取到卖家信息":
-                    valid_soldby_value = ConditionOp.check_soldby(product_info, "Amazon")
-                    if valid_soldby_value is None:
                         break
             else:
                 break
@@ -515,7 +531,7 @@ class CsvOp:
             writer.writerow(rowddata)
 
     @staticmethod
-    def save_to_csv(second_category, third_category, min_category, pro_file, data):
+    def save_to_csv(second_category, third_category, min_category, pro_file, data: list):
         with lock:
             with open(pro_file, 'a', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
@@ -548,7 +564,19 @@ class CsvOp:
                 writer = csv.writer(f)
                 writer.writerow([second_category, third_category, min_category, url])
 
-    
+    @staticmethod
+    def remove_repeat_url(file):
+        import pandas as pd
+
+        # 读取csv文件
+        df = pd.read_csv(file)
+
+        # 删除URL列重复的行
+        df = df.drop_duplicates(subset='链接')
+
+        # 将结果写入新的csv文件
+        df.to_csv(file, index=False)
+
 
 class ConditionOp:
     @staticmethod
@@ -572,9 +600,6 @@ class ConditionOp:
     def check_date(product: dict, max_days):
         date_format = '%d %B %Y'
         date_str = product.get('date')
-        if not date_str:
-            return None
-
         try:
             date_obj = datetime.datetime.strptime(date_str, date_format).date()
             if datetime.datetime.now().date() - date_obj <= datetime.timedelta(days=max_days):
@@ -583,13 +608,25 @@ class ConditionOp:
             else:
                 return None
         except ValueError:
-            return None
+            return product
 
     @staticmethod
     def check_soldby(product: dict, soldby):
         if product.get("soldby") and (soldby.lower() in product.get("soldby").lower()):
             return None
         return product
+
+    @staticmethod
+    def check_rank(product: dict, rank):
+        try:
+            if product.get("rank"):
+                if int(product.get("rank")) <= 0:
+                    pass
+                elif int(product.get("rank")) > rank:
+                    return None
+            return product
+        except Exception:
+            return product
 
 
 def init_file():
@@ -604,10 +641,90 @@ def init_file():
     return pro_file, error_pro_file
 
 
+def load_error_data(error_pro_file):
+    import csv
+    error_list = []
+    with open(error_pro_file, 'r', encoding='utf-8') as f:
+        reader = csv.reader(f)  # 创建 CSV 读取器
+        # 跳过标题行
+        headers = next(reader)
+        print("标题行:", headers)  # 可选：打印标题行
+        for row in reader:
+            error_list.append(row)
+    return error_list
+
+
+def thread_task(data, pro_file, error_pro_file,max_category):
+    # 单条数据的处理逻辑
+
+    def process_single_item(driver, item, pro_file, error_pro_file):
+        second_category, third_category, min_category, link = item
+        pro_info = ParseData.scrape_product_info(driver, link, error_pro_file, second_category, third_category,
+                                                 min_category,max_category)
+        pro_info["link"] = link
+        valid_date_value = ConditionOp.check_date(pro_info, 180)
+        if valid_date_value is None:
+            return
+        valid_soldby_value = ConditionOp.check_soldby(valid_date_value, "Amazon")
+        if valid_soldby_value is None:
+            return
+        valid_rank_value = ConditionOp.check_rank(valid_soldby_value, 10000)
+        if valid_rank_value is None:
+            return
+        CsvOp.save_to_csv(second_category, third_category, min_category, pro_file, [valid_rank_value])
+    pool = WebDriverPool(5)
+    futures = []
+    for item in data:
+        try:
+            future = pool.submit(process_single_item, item, pro_file, error_pro_file)
+            futures.append(future)
+        except Exception as e:
+            with lock:
+                with open("error", "a+", encoding="utf-8") as f:
+                    f.write(f"{item}\n")
+                    f.write(f"{e}\n")
+    for future in futures:
+        future.result()  # 等待任务完成
+
+    pool.shutdown()
+
+
+def retry_error_data(error_pro_file, pro_file,max_category):
+    error_data = load_error_data(error_pro_file)
+    # 清空文件内容，以便重新写入数据，除了标题行
+    init_error_pro_file = ['二级类目', '三级类目', '最小类', '链接']
+    CsvOp.init_csv(error_pro_file, init_error_pro_file)
+    # print("error_data:", error_data)
+
+    if len(error_data) < 3:
+        # 如果数据少于三个，全放在第一个块
+        chunks = [error_data, [], []]
+    else:
+        # 正常分成三块
+        chunk_size = len(error_data) // 3
+        remainder = len(error_data) % 3
+
+        chunks = [
+            error_data[:chunk_size],  # 第一块
+            error_data[chunk_size:2 * chunk_size],  # 第二块
+            error_data[2 * chunk_size:]  # 第三块
+        ]
+        # 如果有余数，把多的元素加到最后一个块
+        if remainder:
+            chunks[-1].extend(error_data[-remainder:])
+        
+    # 使用 ProcessPoolExecutor 创建多个进程
+    with ProcessPoolExecutor(max_workers=3) as process_executor:
+        for chunk in chunks:
+            if chunk:  # 确保非空
+                process_executor.submit(partial(thread_task, chunk, pro_file, error_pro_file, max_category))
+        
+        
 if __name__ == '__main__':
     start = time.time()
+    max_category = "Office Products"
     pro_file, error_pro_file = init_file()
-    pro_url = 'https://www.amazon.ae/gp/bestsellers/office-products/ref=zg_bs_nav_office-products_0'
+    pro_url = 'https://www.amazon.ae/gp/bestsellers/pet-products/ref=zg_bs_nav_pet-products_0'
     driver = WebOp.init_driver()
     second_categorys = ParseData.scrape_second_category(driver, pro_url)
     driver.quit()
@@ -618,12 +735,22 @@ if __name__ == '__main__':
     with multiprocessing.Pool(processes=cpu_count) as pool:
         try:
             # pool.starmap(process_second_category, [(second_category, )for second_category in second_categorys[2:]])
-            pool.starmap(process_second_category, [(second_category,pro_file,error_pro_file )for second_category in second_categorys])
+            pool.starmap(process_second_category, [(second_category, pro_file,
+                         error_pro_file,max_category)for second_category in second_categorys])
         except Exception as e:
             print(e)
-        
+
+    # error_pro_file = "ae_office_products_2024-10-18_10-40-51_error.csv"
+    # pro_file = "ae_office_products_2024-10-18_10-40-51.csv"
+    mid = time.time()
+    for i in range(3):
+        CsvOp.remove_repeat_url(error_pro_file)
+        CsvOp.remove_repeat_url(pro_file)
+        retry_error_data(error_pro_file, pro_file,max_category)
+
     end = time.time()
-    print("Time taken:", end - start, "seconds")
+    print("mid-Time taken:", mid - start, "seconds")
+    print("end-Time taken:", end - start, "seconds")
 
     # driver = WebOp.init_driver()
     # ParseData.scrape_product_info(
