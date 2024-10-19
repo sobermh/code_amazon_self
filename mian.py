@@ -6,6 +6,7 @@ import multiprocessing
 import os
 import queue
 import re
+import sys
 import threading
 from amazoncaptcha import AmazonCaptcha
 from selenium import webdriver
@@ -165,7 +166,7 @@ class WebOp:
 
         ]
 
-        # options.add_argument("--headless")  # 无头模式
+        options.add_argument("--headless")  # 无头模式
         options.add_argument('--ignore-certificate-errors-spki-list')
         options.add_argument('--ignore-ssl-errors')
         options.add_argument("--disable-infobars")  # 禁止显示chrome的浏览器正在受到自动测试软件控制的通知栏
@@ -438,7 +439,7 @@ class ParseData:
                         # 移除 Unicode 控制字符
                         clean_value = re.sub(r'[\u200e\u200f]', '', value)
                         # 正则表达式匹配前的数字
-                        match = re.search(fr'#([\d,]+)\s*in\s*{max_category}', clean_value)
+                        match = re.search(r'#([\d,]+)', clean_value)
                         # 如果匹配成功，提取数字，否则返回0
                         if match:
                             # 将逗号去掉后转换为整数
@@ -447,7 +448,7 @@ class ParseData:
                             except:
                                 number = -1
                         else:
-                            number = clean_value if clean_value else 0
+                            number = clean_value if clean_value else -1
                         product_info['rank'] = number
                     elif key == 'Date First Available':
                         product_info['date'] = re.sub(r'[\u200e\u200f]', '', value)
@@ -629,9 +630,9 @@ class ConditionOp:
             return product
 
 
-def init_file():
+def init_file(max_category):
     now_str = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-    filename = f'ae_office_products_{now_str}'
+    filename = f'ae_{max_category}_{now_str}'
     pro_file = f'{filename}.csv'
     error_pro_file = f'{filename}_error.csv'
     init_pro_file = ['二级类目', '三级类目', '最小类', '排名', '名称', '价格', '上架日期', '链接', '卖家']
@@ -719,12 +720,14 @@ def retry_error_data(error_pro_file, pro_file,max_category):
             if chunk:  # 确保非空
                 process_executor.submit(partial(thread_task, chunk, pro_file, error_pro_file, max_category))
         
-        
-if __name__ == '__main__':
+ 
+def main():
+    max_category = input("请输入最大类目名称:")
+    pro_url = input("请输入类目链接:")
+    # max_category = "Office Products"
+    # pro_url = 'https://www.amazon.ae/gp/bestsellers/pet-products/ref=zg_bs_nav_pet-products_0'
     start = time.time()
-    max_category = "Office Products"
-    pro_file, error_pro_file = init_file()
-    pro_url = 'https://www.amazon.ae/gp/bestsellers/pet-products/ref=zg_bs_nav_pet-products_0'
+    pro_file, error_pro_file = init_file(max_category)
     driver = WebOp.init_driver()
     second_categorys = ParseData.scrape_second_category(driver, pro_url)
     driver.quit()
@@ -737,6 +740,11 @@ if __name__ == '__main__':
             # pool.starmap(process_second_category, [(second_category, )for second_category in second_categorys[2:]])
             pool.starmap(process_second_category, [(second_category, pro_file,
                          error_pro_file,max_category)for second_category in second_categorys])
+        except KeyboardInterrupt:
+            print("Interrupted by user. Terminating processes...")
+            pool.terminate()
+            pool.join()
+            os._exit(1)  # 强行退出程序
         except Exception as e:
             print(e)
 
@@ -752,6 +760,15 @@ if __name__ == '__main__':
     print("mid-Time taken:", mid - start, "seconds")
     print("end-Time taken:", end - start, "seconds")
 
+        
+if __name__ == '__main__':
+    multiprocessing.freeze_support()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print('\nKeyboard interrupt detected. Exiting...')
+        os._exit(1) 
+    
     # driver = WebOp.init_driver()
     # ParseData.scrape_product_info(
     #     driver, "https://www.amazon.ae/Loctite-1360694-Plastic-Adhesive-Multicolor/dp/B001F7E9VI/ref=zg_bs_g_15194024031_d_sccl_15/261-6336418-8804356?th=1", "", "", "", "")
