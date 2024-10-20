@@ -755,20 +755,20 @@ def main():
 
         
 if __name__ == '__main__':
-    # multiprocessing.freeze_support()
-    # try:
-    #     main()
-    # except KeyboardInterrupt:
-    #     print('\nKeyboard interrupt detected. Exiting...')
-    #     os._exit(1) 
+    multiprocessing.freeze_support()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print('\nKeyboard interrupt detected. Exiting...')
+        os._exit(1) 
     
-    error_pro_file = "ae_Appliances_2024-10-19_20-34-29_error.csv"
-    pro_file = "ae_Appliances_2024-10-19_20-34-29.csv"
-    driver = WebOp.init_driver()
-    pro_info = ParseData.scrape_product_info(
-        driver, "https://www.amazon.ae/Black-Decker-Electronic-Browning-ET124-B5/dp/B00A7PM2DG/ref=zg_bs_g_12134171031_d_sccl_86/257-5276613-8037318?psc=1,%E6%9C%AA%E8%8E%B7%E5%8F%96%E5%88%B0%E5%8D%96%E5%AE%B6%E4%BF%A1%E6%81%AF", error_pro_file, "", "", "","Kitchen")
-    if pro_info is None:
-        pass
-    else:
-        pro = ConditionOp.check_all(pro_info,180,"Amazon",10000)
-    driver.quit()
+    # error_pro_file = "ae_Appliances_2024-10-19_20-34-29_error.csv"
+    # pro_file = "ae_Appliances_2024-10-19_20-34-29.csv"
+    # driver = WebOp.init_driver()
+    # pro_info = ParseData.scrape_product_info(
+    #     driver, "https://www.amazon.ae/Black-Decker-Electronic-Browning-ET124-B5/dp/B00A7PM2DG/ref=zg_bs_g_12134171031_d_sccl_86/257-5276613-8037318?psc=1,%E6%9C%AA%E8%8E%B7%E5%8F%96%E5%88%B0%E5%8D%96%E5%AE%B6%E4%BF%A1%E6%81%AF", error_pro_file, "", "", "","Kitchen")
+    # if pro_info is None:
+    #     pass
+    # else:
+    #     pro = ConditionOp.check_all(pro_info,180,"Amazon",10000)
+    # driver.quit()
