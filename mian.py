@@ -84,17 +84,14 @@ def process_second_category(second_category, pro_file, error_pro_file,max_catego
                     continue
                 pro_info = ParseData.scrape_product_info(
                     driver, valid_price_value["link"], error_pro_file, second_category, third_category, min_category,max_category)
+                if pro_info is None:
+                    continue
                 valid_price_value.update(pro_info)
-                valid_date_value = ConditionOp.check_date(valid_price_value, 180)
-                if valid_date_value is None:
+                print(valid_price_value)
+                pro = ConditionOp.check_all(valid_price_value,180,"Amazon",10000)
+                if pro is None:
                     continue
-                valid_soldby_value = ConditionOp.check_soldby(valid_date_value, "Amazon")
-                if valid_soldby_value is None:
-                    continue
-                valid_rank_value = ConditionOp.check_rank(valid_soldby_value, 10000)
-                if valid_rank_value is None:
-                    continue
-                remian_products.append(valid_rank_value)
+                remian_products.append(pro)
             return remian_products
 
         def selenium_task(driver, category, url, second_category, third_category, min_category):
@@ -166,7 +163,7 @@ class WebOp:
 
         ]
 
-        options.add_argument("--headless")  # 无头模式
+        # options.add_argument("--headless")  # 无头模式
         options.add_argument('--ignore-certificate-errors-spki-list')
         options.add_argument('--ignore-ssl-errors')
         options.add_argument("--disable-infobars")  # 禁止显示chrome的浏览器正在受到自动测试软件控制的通知栏
@@ -223,28 +220,31 @@ class WebOp:
 
     @staticmethod
     def load_html(driver: webdriver.Chrome):
-        # 定义滚动的暂停时间
-        # scroll_pause_time = 1
-        max_scroll_times = 10
-        scroll_height = 600  # 可以根据实际情况调整
+        try:
+            # 定义滚动的暂停时间
+            # scroll_pause_time = 1
+            max_scroll_times = 10
+            scroll_height = 600  # 可以根据实际情况调整
 
-        for i in range(max_scroll_times):
-            # 计算下一个滚动的目标位置
-            target_position = scroll_height * (i + 1)
+            for i in range(max_scroll_times):
+                # 计算下一个滚动的目标位置
+                target_position = scroll_height * (i + 1)
 
-            # 滚动到下一个位置
-            driver.execute_script(f"window.scrollTo(0, {target_position});")
+                # 滚动到下一个位置
+                driver.execute_script(f"window.scrollTo(0, {target_position});")
 
-            # 等待内容加载
-            time.sleep(0.5)  # 可以根据实际情况调整等待时间
+                # 等待内容加载
+                time.sleep(0.5)
 
-            # 检查是否已经滚动到底部
-            # scroll_position = driver.execute_script("return window.pageYOffset;")
-            # total_height = driver.execute_script("return document.body.scrollHeight;")
-            # window_height = driver.execute_script("return window.innerHeight;")
-            # if scroll_position + window_height >= total_height:
-            #     # 已经滚动到底部，退出循环
-            #     break
+                # 检查是否已经滚动到底部
+                # scroll_position = driver.execute_script("return window.pageYOffset;")
+                # total_height = driver.execute_script("return document.body.scrollHeight;")
+                # window_height = driver.execute_script("return window.innerHeight;")
+                # if scroll_position + window_height >= total_height:
+                #     # 已经滚动到底部，退出循环
+                #     break
+        except Exception as e:
+            print(e)
         return driver.page_source
 
     @staticmethod
@@ -267,15 +267,18 @@ class ParseData:
 
     @staticmethod
     def valid_for_captcha(driver: webdriver.Chrome):
-        captcha = AmazonCaptcha.fromdriver(driver)
-        captcha = AmazonCaptcha.fromlink(captcha.image_link)
-        solution = captcha.solve()
-        input_element = driver.find_element(By.ID, "captchacharacters")
-        input_element.clear()
-        input_element.send_keys(solution)
+        try:
+            captcha = AmazonCaptcha.fromdriver(driver)
+            captcha = AmazonCaptcha.fromlink(captcha.image_link)
+            solution = captcha.solve()
+            input_element = driver.find_element(By.ID, "captchacharacters")
+            input_element.clear()
+            input_element.send_keys(solution)
 
-        submit_button = driver.find_element(By.CLASS_NAME, "a-button-text")
-        submit_button.click()
+            submit_button = driver.find_element(By.CLASS_NAME, "a-button-text")
+            submit_button.click()
+        except Exception as e:
+            print(e)
 
     @staticmethod
     def init_web(driver: webdriver.Chrome, url, wait_condition: tuple):
@@ -283,24 +286,6 @@ class ParseData:
         wait = WebDriverWait(driver, 5)
         start_time = time.time()  # 记录开始时间
         flag = False
-        # while True:
-        #     WebOp.load_html(driver)
-        #     if time.time() - start_time > 60:  # 如果已经超过60秒，就跳出循环
-        #         print("********************")
-        #         print(url)
-        #         break
-        #     try:
-        #         wait.until(EC.presence_of_element_located(wait_condition))
-        #         # element = driver.find_element(*wait_condition)
-        #         flag = True
-        #         break
-        #     except Exception as e:
-        #         if ParseData.check_for_captcha(driver):
-        #             ParseData.valid_for_captcha(driver)
-        #         # else:
-        #         #     print("---------------------")
-        #         #     print("Timeout waiting for element to be present.")
-
         WebOp.load_html(driver)
         try:
             # wait.until(EC.presence_of_element_located(wait_condition))
@@ -415,106 +400,100 @@ class ParseData:
             'rank': '',
             "soldby": "",
         }
-        flag = 0
-        for i in range(1):
-            flag += 1
-            wait_condition = (By.ID, "ask-btf-container")
-            ParseData.init_web(driver, url, wait_condition)
+        wait_condition = (By.ID, "ask-btf-container")
+        ParseData.init_web(driver, url, wait_condition)
+        try:
+            soup = BeautifulSoup(driver.page_source, 'html.parser')
+            info_section = soup.find('div', {'id': 'prodDetails'})
+            # 提取产品技术细节
+            tech_table = info_section.find('table', {'id': 'productDetails_techSpec_section_1'})
+            for row in tech_table.find_all('tr'):
+                key = row.find('th').get_text(strip=True)
+                value = row.find('td').get_text(strip=True)
+                if key == 'Product Dimensions':
+                    product_info['dimensions'] = re.sub(r'[\u200e\u200f]', '', value)
+            # 提取附加信息
+            additional_table = info_section.find('table', {'id': 'productDetails_detailBullets_sections1'})
+            for row in additional_table.find_all('tr'):
+                key = row.find('th').get_text(strip=True)
+                value = row.find('td').get_text(strip=True)
+                if key == 'Best Sellers Rank':
+                    # 移除 Unicode 控制字符
+                    clean_value = re.sub(r'[\u200e\u200f]', '', value)
+                    # 正则表达式匹配前的数字
+                    match = re.search(r'#([\d,]+)', clean_value)
+                    # 如果匹配成功，提取数字，否则返回0
+                    if match:
+                        # 将逗号去掉后转换为整数
+                        try:
+                            number = int(match.group(1).replace(',', ''))
+                        except:
+                            number = -1
+                    else:
+                        number = clean_value if clean_value else -1
+                    product_info['rank'] = number
+                elif key == 'Date First Available':
+                    product_info['date'] = re.sub(r'[\u200e\u200f]', '', value)
+        except Exception as e:
             try:
                 soup = BeautifulSoup(driver.page_source, 'html.parser')
-                info_section = soup.find('div', {'id': 'prodDetails'})
-                # 提取产品技术细节
-                tech_table = info_section.find('table', {'id': 'productDetails_techSpec_section_1'})
-                for row in tech_table.find_all('tr'):
-                    key = row.find('th').get_text(strip=True)
-                    value = row.find('td').get_text(strip=True)
-                    if key == 'Product Dimensions':
-                        product_info['dimensions'] = re.sub(r'[\u200e\u200f]', '', value)
-                # 提取附加信息
-                additional_table = info_section.find('table', {'id': 'productDetails_detailBullets_sections1'})
-                for row in additional_table.find_all('tr'):
-                    key = row.find('th').get_text(strip=True)
-                    value = row.find('td').get_text(strip=True)
-                    if key == 'Best Sellers Rank':
-                        # 移除 Unicode 控制字符
-                        clean_value = re.sub(r'[\u200e\u200f]', '', value)
-                        # 正则表达式匹配前的数字
-                        match = re.search(r'#([\d,]+)', clean_value)
-                        # 如果匹配成功，提取数字，否则返回0
-                        if match:
-                            # 将逗号去掉后转换为整数
-                            try:
-                                number = int(match.group(1).replace(',', ''))
-                            except:
-                                number = -1
-                        else:
-                            number = clean_value if clean_value else -1
-                        product_info['rank'] = number
-                    elif key == 'Date First Available':
-                        product_info['date'] = re.sub(r'[\u200e\u200f]', '', value)
+                info_section = soup.find('div', {'id': 'detailBulletsWrapper_feature_div'})
+                info_section2 = soup.find_all(
+                    'ul', {'class': 'a-unordered-list a-nostyle a-vertical a-spacing-none detail-bullet-list'})[1]
+                for li in info_section.find_all('li'):
+                    text = li.get_text(strip=True)
+                    if 'Product Dimensions' in text:
+                        product_info['dimensions'] = re.sub(r'[\u200e\u200f]', '', text.split(':')[-1].strip())
+                    elif 'Date First Available' in text:
+                        product_info['date'] = re.sub(r'[\u200e\u200f]', '', text.split(':')[-1].strip())
+                for li in info_section2.find_all('li'):
+                    text = li.get_text(strip=True)
+                    if 'Best Sellers Rank' in text:
+                        ranks = re.findall(r'#(\d+)\s+in\s*([A-Za-z\s]+)',
+                                            re.sub(r'[\u200e\u200f]', '', text.split(':')[-1].strip()))
+                        rank_dict = {category.strip(): rank for rank, category in ranks}
+                        product_info['rank'] = rank_dict.get(max_category, 0)
             except Exception as e:
-                try:
-                    soup = BeautifulSoup(driver.page_source, 'html.parser')
-                    info_section = soup.find('div', {'id': 'detailBulletsWrapper_feature_div'})
-                    info_section2 = soup.find_all(
-                        'ul', {'class': 'a-unordered-list a-nostyle a-vertical a-spacing-none detail-bullet-list'})[1]
-                    for li in info_section.find_all('li'):
-                        text = li.get_text(strip=True)
-                        if 'Product Dimensions' in text:
-                            product_info['dimensions'] = re.sub(r'[\u200e\u200f]', '', text.split(':')[-1].strip())
-                        elif 'Date First Available' in text:
-                            product_info['date'] = re.sub(r'[\u200e\u200f]', '', text.split(':')[-1].strip())
-                    for li in info_section2.find_all('li'):
-                        text = li.get_text(strip=True)
-                        if 'Best Sellers Rank' in text:
-                            ranks = re.findall(r'#(\d+)\s+in\s*([A-Za-z\s]+)',
-                                               re.sub(r'[\u200e\u200f]', '', text.split(':')[-1].strip()))
-                            rank_dict = {category.strip(): rank for rank, category in ranks}
-                            product_info['rank'] = rank_dict.get(max_category, 0)
-                except Exception as e:
-                    pass
-
-            def parse_pro_soldby(html_soup: BeautifulSoup):
-                sold_by_div = html_soup.find('div', {'id': 'offerDisplayFeatures_desktop'})
-                sold_by_span = sold_by_div.find('span', {'class': 'a-size-small offer-display-feature-text-message'})
-                return sold_by_span.text
-            try:
-                product_info["soldby"] = parse_pro_soldby(soup)
-            except Exception:
-                product_info["soldby"] = "未获取到卖家信息"
-
-            def parse_pro_price(html_soup: BeautifulSoup):
-                sold_by_div = html_soup.find('div', {'id': 'corePriceDisplay_desktop_feature_div'})
-                sold_by_span = sold_by_div.find('span', {'class': 'a-price-whole'})
-                price_text = sold_by_span.text
-                price_numbers = re.sub(r'\D', '', price_text)  # 只保留数字，移除非数字字符
-                return price_numbers
-            try:
-                product_info["price"] = parse_pro_price(soup)
-            except Exception:
                 pass
 
-            def parse_pro_title(html_soup: BeautifulSoup):
-                title_div = html_soup.find('div', {'id': 'titleSection'})
-                title_span = title_div.find('span', {'id': 'productTitle'})
-                return title_span.text.strip()
-            try:
-                product_info["title"] = parse_pro_title(soup)
-            except Exception:
-                pass
+        def parse_pro_soldby(html_soup: BeautifulSoup):
+            sold_by_div = html_soup.find('div', {'id': 'offerDisplayFeatures_desktop'})
+            sold_by_span = sold_by_div.find('span', {'class': 'a-size-small offer-display-feature-text-message'})
+            return sold_by_span.text
+        try:
+            product_info["soldby"] = parse_pro_soldby(soup)
+        except Exception:
+            product_info["soldby"] = "未获取到卖家信息"
 
-            if product_info["date"] == "" and product_info["rank"] == "":
-                if flag == 1:
-                    valid_soldby_value = ConditionOp.check_soldby(product_info, "Amazon")
-                    if valid_soldby_value is None:
-                        break
-                    else:
-                        CsvOp.write_error_url(error_pro_file, url, second_category, third_category, min_category)
-                        break
+        def parse_pro_price(html_soup: BeautifulSoup):
+            sold_by_div = html_soup.find('div', {'id': 'corePriceDisplay_desktop_feature_div'})
+            sold_by_span = sold_by_div.find('span', {'class': 'a-price-whole'})
+            price_text = sold_by_span.text
+            price_numbers = re.sub(r'\D', '', price_text)  # 只保留数字，移除非数字字符
+            return price_numbers
+        try:
+            product_info["price"] = parse_pro_price(soup)
+        except Exception:
+            pass
+
+        def parse_pro_title(html_soup: BeautifulSoup):
+            title_div = html_soup.find('div', {'id': 'titleSection'})
+            title_span = title_div.find('span', {'id': 'productTitle'})
+            return title_span.text.strip()
+        try:
+            product_info["title"] = parse_pro_title(soup)
+        except Exception:
+            pass
+
+        if product_info["date"] == "" and product_info["rank"] == "":
+            valid_soldby_value = ConditionOp.check_soldby(product_info, "Amazon")
+            if valid_soldby_value is None:
+                pass
             else:
-                break
-        print(product_info)
-        return product_info
+                CsvOp.write_error_url(error_pro_file, url, second_category, third_category, min_category)
+            return None
+        else:
+            return product_info
 
     @staticmethod
     def parse_region_url(url):
@@ -613,6 +592,8 @@ class ConditionOp:
 
     @staticmethod
     def check_soldby(product: dict, soldby):
+        if product.get("soldby") is None:
+            return None
         if product.get("soldby") and (soldby.lower() in product.get("soldby").lower()):
             return None
         return product
@@ -629,6 +610,20 @@ class ConditionOp:
         except Exception:
             return product
 
+    @staticmethod
+    def check_all(product: dict, max_days, soldby, rank):
+        date_res = ConditionOp.check_date(product, max_days)
+        if date_res is None:
+            return None
+        soldby_res = ConditionOp.check_soldby(date_res, soldby)
+        if soldby_res is None:
+            return None
+        rank_res = ConditionOp.check_rank(soldby_res, rank)
+        if rank_res is None:
+            return None
+        return rank_res
+    
+    
 
 def init_file(max_category):
     now_str = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
@@ -662,6 +657,8 @@ def thread_task(data, pro_file, error_pro_file,max_category):
         second_category, third_category, min_category, link = item
         pro_info = ParseData.scrape_product_info(driver, link, error_pro_file, second_category, third_category,
                                                  min_category,max_category)
+        if pro_info is None:
+            return
         pro_info["link"] = link
         valid_date_value = ConditionOp.check_date(pro_info, 180)
         if valid_date_value is None:
@@ -724,8 +721,6 @@ def retry_error_data(error_pro_file, pro_file,max_category):
 def main():
     max_category = input("请输入最大类目名称:")
     pro_url = input("请输入类目链接:")
-    # max_category = "Office Products"
-    # pro_url = 'https://www.amazon.ae/gp/bestsellers/pet-products/ref=zg_bs_nav_pet-products_0'
     start = time.time()
     pro_file, error_pro_file = init_file(max_category)
     driver = WebOp.init_driver()
@@ -748,8 +743,6 @@ def main():
         except Exception as e:
             print(e)
 
-    # error_pro_file = "ae_office_products_2024-10-18_10-40-51_error.csv"
-    # pro_file = "ae_office_products_2024-10-18_10-40-51.csv"
     mid = time.time()
     for i in range(3):
         CsvOp.remove_repeat_url(error_pro_file)
@@ -762,14 +755,20 @@ def main():
 
         
 if __name__ == '__main__':
-    multiprocessing.freeze_support()
-    try:
-        main()
-    except KeyboardInterrupt:
-        print('\nKeyboard interrupt detected. Exiting...')
-        os._exit(1) 
+    # multiprocessing.freeze_support()
+    # try:
+    #     main()
+    # except KeyboardInterrupt:
+    #     print('\nKeyboard interrupt detected. Exiting...')
+    #     os._exit(1) 
     
-    # driver = WebOp.init_driver()
-    # ParseData.scrape_product_info(
-    #     driver, "https://www.amazon.ae/Loctite-1360694-Plastic-Adhesive-Multicolor/dp/B001F7E9VI/ref=zg_bs_g_15194024031_d_sccl_15/261-6336418-8804356?th=1", "", "", "", "")
-    # driver.quit()
+    error_pro_file = "ae_Appliances_2024-10-19_20-34-29_error.csv"
+    pro_file = "ae_Appliances_2024-10-19_20-34-29.csv"
+    driver = WebOp.init_driver()
+    pro_info = ParseData.scrape_product_info(
+        driver, "https://www.amazon.ae/Black-Decker-Electronic-Browning-ET124-B5/dp/B00A7PM2DG/ref=zg_bs_g_12134171031_d_sccl_86/257-5276613-8037318?psc=1,%E6%9C%AA%E8%8E%B7%E5%8F%96%E5%88%B0%E5%8D%96%E5%AE%B6%E4%BF%A1%E6%81%AF", error_pro_file, "", "", "","Kitchen")
+    if pro_info is None:
+        pass
+    else:
+        pro = ConditionOp.check_all(pro_info,180,"Amazon",10000)
+    driver.quit()
