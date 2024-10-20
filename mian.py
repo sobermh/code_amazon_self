@@ -517,19 +517,13 @@ class CsvOp:
                 writer = csv.writer(f)
                 for item in data:
                     row_data = [second_category, third_category, min_category]
-                    for key, value in item.items():
-                        if key == 'rank':
-                            row_data.insert(3, value)
-                        elif key == 'title':
-                            row_data.insert(4, value)
-                        elif key == 'price':
-                            row_data.insert(5, value)
-                        elif key == 'date':
-                            row_data.insert(6, value)
-                        elif key == 'link':
-                            row_data.insert(7, value)
-                        elif key == "soldby":
-                            row_data.insert(8, value)
+                    keys = ['rank', 'title', 'price', 'date', 'link', 'soldby']
+
+                    for key in keys:
+                        if key in item:
+                            row_data.append(item[key])
+                        else:
+                            row_data.append(None)  # 或者其他默认值
                     writer.writerow(row_data)
             print(f"{second_category}-{third_category}-{min_category} saved to {pro_file} successfully.")
 
