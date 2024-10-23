@@ -9,6 +9,7 @@ import re
 import sys
 import threading
 from amazoncaptcha import AmazonCaptcha
+from openpyxl import load_workbook
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 
@@ -20,6 +21,10 @@ from selenium.common.exceptions import NoSuchElementException, TimeoutException
 import time
 import random
 from bs4 import BeautifulSoup
+
+from autofit_excel import Autofit
+from notice_email import send_email_with_attachment
+from notice_wx import WxBot
 
 
 def save_html(filepath, html):
@@ -465,19 +470,26 @@ class CsvOp:
 
     @staticmethod
     def format_csv(file: str):
+        CsvOp.sort_success_proinfo(file)
+        xlsx_file = CsvOp.csv_to_xlsx(file)
+        wb = load_workbook(filename=xlsx_file)
+        ws = wb.active
+        Autofit(ws).autofit()
+        wb.save(xlsx_file)
+        return xlsx_file
+
+    @staticmethod
+    def sort_success_proinfo(file: str, colname="排名"):
         import pandas as pd
+        try:
+            df = pd.read_csv(file)
+            if f"{colname}" in df.columns:
+                df = df.sort_values(by=f'{colname}')
+            df = df.reset_index(drop=True)
 
-        # # 读取Excel文件
-        # df = pd.read_csv(file)
-        # # 对"二级类目"这一列进行操作
-        # if '二级类目' in df.columns:
-        #     df['二级类目'] = df['二级类目'].apply(CsvOp.translate_text, args=())
-
-        # df.to_csv(file, index=False)
-        # from autofit_excel import Autofit
-        # autofit = Autofit(file)
-
-
+            df.to_csv(file, index=False)
+        except Exception as e:
+            print(e)
 
     @staticmethod
     def write_error_proinfo(error_pro_file, url, second_category, third_category, min_category):
@@ -489,21 +501,23 @@ class CsvOp:
     @staticmethod
     def remove_repeat_proinfo(file: str):
         import pandas as pd
+        try:
+            # 读取csv文件
+            df = pd.read_csv(file)
 
-        # 读取csv文件
-        df = pd.read_csv(file)
+            # 删除URL列重复的行
+            if '链接' in df.columns:
+                df = df.drop_duplicates(subset='链接')
 
-        # 删除URL列重复的行
-        if '链接' in df.columns:
-            df = df.drop_duplicates(subset='链接')
+            # 如果'名称'列存在，则删除'名称'列重复的行
+            if '名称' in df.columns:
+                df = df.drop_duplicates(subset='名称')
 
-        # 如果'名称'列存在，则删除'名称'列重复的行
-        if '名称' in df.columns:
-            df = df.drop_duplicates(subset='名称')
-
-        df = df.reset_index(drop=True)
-        # 将结果写入新的csv文件
-        df.to_csv(file, index=False)
+            df = df.reset_index(drop=True)
+            # 将结果写入新的csv文件
+            df.to_csv(file, index=False)
+        except Exception as e:
+            print(e)
 
     @staticmethod
     def init_proinfo_csv(max_category: str):
@@ -540,8 +554,16 @@ class CsvOp:
             translated = translator.translate(text, src='en', dest='zh-cn')
         except AttributeError:
             print("Translation failed for text: ", text)
-        
+
         return translated.text
+
+    @staticmethod
+    def csv_to_xlsx(csvpath):
+        import pandas as pd
+        df = pd.read_csv(csvpath)
+        output_xlsx_path = csvpath.replace('.csv', '.xlsx')
+        df.to_excel(output_xlsx_path, index=False)
+        return output_xlsx_path
 
 
 class ConditionOp:
@@ -776,6 +798,27 @@ def main():
         CsvOp.remove_repeat_proinfo(pro_file)
         retry_error_data(error_pro_file, pro_file, max_category)
 
+    xlsx_file = CsvOp.format_csv(pro_file)
+
+    # 发送邮件
+    attach_file = []
+    if os.path.isabs(xlsx_file) == False:
+        path = os.path.join(os.getcwd(), xlsx_file)
+        attach_file.append(path)
+    else:
+        attach_file.append(xlsx_file)
+    now_str = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+    send_email_with_attachment(
+        subject=f"AU_Amazon_{now_str}",
+        body="最新的亚马逊筛选数据,This email has an attachment.",
+        to_email="837671287@qq.com",
+        from_email="409788696@qq.com",
+        smtp_server="smtp.qq.com",
+        smtp_port=587,
+        login="409788696@qq.com",
+        password="wkevznzegbjmbhbc",
+        file_paths=attach_file
+    )
     end = time.time()
     print("mid-Time taken:", mid - start, "seconds")
     print("end-Time taken:", end - start, "seconds")
@@ -794,6 +837,3 @@ if __name__ == '__main__':
     #     driver, "https://www.amazon.ae/Lilly-Pulitzer-Pencil-Case-Something/dp/B09ZJ8H5VP/ref=zg_bs_g_12421756031_d_sccl_81/260-7180514-0292631?psc=1", "Electronics")
     # print(pro_info)
     # driver.quit()
-
-
-    # CsvOp.format_csv("ae_Electronics_2024-10-20_18-16-43.csv")
