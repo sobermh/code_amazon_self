@@ -116,6 +116,7 @@ class WebOp:
                 driver = webdriver.Chrome(service=chrome_driver_path, options=options)
                 break
             except Exception as e:
+                print(e)
                 time.sleep(30)
 
         # 禁用webdriver特征，以防止被检测
@@ -128,21 +129,13 @@ class WebOp:
                 """
             })
         except:
-            pass
+            print(e)
         return driver
 
     @staticmethod
     def open_url(driver, url):
         driver.get(url)
         # time.sleep(1)
-
-    @staticmethod
-    def close_driver(driver):
-        driver.quit()
-        try:
-            WebOp.write_max_driver()
-        except:
-            pass
 
     @staticmethod
     def load_html(driver: webdriver.Chrome):
@@ -192,6 +185,7 @@ class ParseData:
             else:
                 return False
         except Exception as e:
+            print(e)
             return True
 
     @staticmethod
@@ -299,6 +293,7 @@ class ParseData:
                 min_category = [third_category_list]
             else:
                 min_category = category_list[2:]
+        print(f"{second_category}-{third_category['category']} : {min_category}")
         return min_category
 
     @staticmethod
@@ -318,10 +313,12 @@ class ParseData:
                     product_list.append({'rank': start_index+index+1,  'title': title,
                                         'price': price, 'link': base_url+a})
                 except Exception as e:
+                    print(f'{e}')
                     continue
             return product_list
         wait_condition = (By.CSS_SELECTOR, "#gridItemRoot")
         ParseData.init_web(driver, url, wait_condition)
+        pro_list = []
         try:
             soup = BeautifulSoup(driver.page_source, 'html.parser')
             pro1_list = parse_product(url, soup)
@@ -332,9 +329,13 @@ class ParseData:
                 pro2_list = parse_product(url, BeautifulSoup(page_html, 'html.parser'), start_index=50)
             except:
                 pro2_list = []
-            return pro1_list + pro2_list
+            pro_list = pro1_list + pro2_list
         except Exception as e:
-            return [{}]
+            print(f"解析失败:{e}")
+            pro_list = [{}]
+        # print("*" * 15)
+        # print(f"pro_list : {pro_list}")
+        return pro_list
 
     @staticmethod
     def scrape_product_info(driver: webdriver.Chrome, url):
@@ -372,7 +373,7 @@ class ParseData:
                     elif key == 'Disponível para compra desde':
                         product_info['date'] = re.sub(r'[\u200e\u200f]', '', value)
             except Exception as e:
-                pass
+                print(f"第一个解析失败:{e}")
             return product_info
 
         def parse_pro_baseinfo2(soup: BeautifulSoup):
@@ -396,6 +397,7 @@ class ParseData:
                             product_info['rank'] = int(match.group(1))
             except Exception as e:
                 pass
+                # print(f"第二个解析失败{e}")
             return product_info
 
         product_info1 = parse_pro_baseinfo1(soup)
@@ -407,7 +409,7 @@ class ParseData:
                 try:
                     product_info[k] = product_info1[k]
                 except:
-                    pass
+                    print(f"{k}未获取到")
 
         def parse_pro_soldby(html_soup: BeautifulSoup):
             sold_by_div = html_soup.find('div', {'id': 'merchantInfoFeature_feature_div'})
@@ -427,7 +429,7 @@ class ParseData:
         try:
             product_info["price"] = parse_pro_price(soup)
         except Exception:
-            pass
+            print("未获取到价格")
 
         def parse_pro_title(html_soup: BeautifulSoup):
             title_div = html_soup.find('div', {'id': 'centerCol'})
@@ -436,7 +438,7 @@ class ParseData:
         try:
             product_info["title"] = parse_pro_title(soup)
         except Exception:
-            pass
+            print("未获取到标题")
         print(product_info)
         return product_info
 
@@ -572,7 +574,7 @@ class ConditionOp:
     @staticmethod
     def check_price(product: dict, min_price):
         def extract_number(s):
-            match = re.search(r'(\d+\.\d+)', s)
+            match = re.search(r'(\d+)', s)
             if match:
                 return float(match.group(1))
             else:
@@ -637,7 +639,7 @@ class ConditionOp:
         return rank_res
 
 
-def process_parse_second_category(second_category, pro_file, error_pro_file, max_category):
+def process_parse_second_category(second_category, pro_file, error_pro_file):
     driver = WebOp.init_driver()
     third_categorys = ParseData.scrape_third_category(driver, second_category["link"])
     driver.quit()
@@ -786,9 +788,10 @@ def main():
     cpu_count = 3
     with multiprocessing.Pool(processes=cpu_count) as pool:
         try:
-            # pool.starmap(process_parse_second_category, [(second_category, )for second_category in second_categorys[2:]])
             pool.starmap(process_parse_second_category, [(second_category, pro_file,
-                         error_pro_file, max_category)for second_category in second_categorys])
+                                                          error_pro_file)for second_category in second_categorys[1:]])
+            # pool.starmap(process_parse_second_category, [(second_category, pro_file,
+            #              error_pro_file)for second_category in second_categorys])
         except KeyboardInterrupt:
             print("Interrupted by user. Terminating processes...")
             pool.terminate()
@@ -841,6 +844,5 @@ if __name__ == '__main__':
 
     # driver = WebOp.init_driver()
     # pro_info = ParseData.scrape_product_info(
-    #     driver, "https://www.amazon.com.br/Amazon-53-024641-Adaptador-de-energia/dp/B086ZK1PP5/ref=zg_bs_g_amazon-devices_d_sccl_10/142-0053349-4269762?psc=1")
-    # print(pro_info)
+    #     driver, "https://www.amazon.com.br/Cadeira-Escrit%C3%B3rio-Secret%C3%A1ria-Cromada-Rodinha/dp/B0BWSJY84N/ref=zg_bs_g_furniture_d_sccl_2/142-0053349-4269762?psc=1")
     # driver.quit()
