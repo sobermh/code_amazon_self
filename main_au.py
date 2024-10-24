@@ -10,6 +10,7 @@ import sys
 import threading
 from amazoncaptcha import AmazonCaptcha
 from openpyxl import load_workbook
+import regex
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 
@@ -104,10 +105,12 @@ class WebOp:
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
 
-        options.add_argument("--lang=zh-CN")  # 添加此行以设置默认语言为中文
         chrome_driver_path = Service(r"chromedriver.exe")  # 替换为你本地 ChromeDriver 的路径
 
-        prefs = {"profile.managed_default_content_settings.images": 2}
+        prefs = {
+            "profile.managed_default_content_settings.images": 2,
+            "profile.managed_default_content_settings.video": 2
+        }
         options.add_experimental_option("prefs", prefs)
 
         # 选择可用的代理服务器
@@ -322,7 +325,7 @@ class ParseData:
             return [{}]
 
     @staticmethod
-    def scrape_product_info(driver: webdriver.Chrome, url, max_category):
+    def scrape_product_info(driver: webdriver.Chrome, url):
         product_info = {
             'dimensions': '',
             'date': '',
@@ -342,7 +345,7 @@ class ParseData:
                 for row in tech_table.find_all('tr'):
                     key = row.find('th').get_text(strip=True)
                     value = row.find('td').get_text(strip=True)
-                    if key == 'Product Dimensions':
+                    if key == 'Product dimensions':
                         product_info['dimensions'] = re.sub(r'[\u200e\u200f]', '', value)
                 # 提取附加信息
                 additional_table = info_section.find('table', {'id': 'productDetails_detailBullets_sections1'})
@@ -350,18 +353,10 @@ class ParseData:
                     key = row.find('th').get_text(strip=True)
                     value = row.find('td').get_text(strip=True)
                     if key == 'Best Sellers Rank':
-                        # 移除 Unicode 控制字符
-                        clean_value = re.sub(r'[\u200e\u200f]', '', value)
-                        # 正则表达式匹配前的数字
-                        match = re.search(r'#([\d,]+)', clean_value)
-                        # 如果匹配成功，提取数字，否则返回0
+                        clean_value = regex.sub(r'\p{P}', '', value)  # 去掉所有的标点符号
+                        match = regex.search(r'([\p{Nd}]+)', clean_value)
                         if match:
-                            # 将逗号去掉后转换为整数
-                            try:
-                                number = int(match.group(1).replace(',', ''))
-                                product_info['rank'] = number
-                            except:
-                                pass
+                            product_info['rank'] = int(match.group(1))
                     elif key == 'Date First Available':
                         product_info['date'] = re.sub(r'[\u200e\u200f]', '', value)
             except Exception as e:
@@ -383,15 +378,10 @@ class ParseData:
                 for li in info_section2.find_all('li'):
                     text = li.get_text(strip=True)
                     if 'Best Sellers Rank' in text:
-                        clean_value = re.sub(r'[\u200e\u200f]', '', text.split(':')[-1].strip())
-                        match = re.search(r'#([\d,]+)', clean_value)
+                        clean_value = regex.sub(r'\p{P}', '', text.split(':')[-1].strip())
+                        match = regex.search(r'([\p{Nd}]+)', clean_value)
                         if match:
-                            # 将逗号去掉后转换为整数
-                            try:
-                                number = int(match.group(1).replace(',', ''))
-                                product_info['rank'] = number
-                            except:
-                                pass
+                            product_info['rank'] = int(match.group(1))
             except Exception as e:
                 pass
             return product_info
@@ -632,7 +622,7 @@ class ConditionOp:
         return rank_res
 
 
-def process_parse_second_category(second_category, pro_file, error_pro_file, max_category):
+def process_parse_second_category(second_category, pro_file, error_pro_file):
     driver = WebOp.init_driver()
     third_categorys = ParseData.scrape_third_category(driver, second_category["link"])
     driver.quit()
@@ -652,7 +642,7 @@ def process_parse_second_category(second_category, pro_file, error_pro_file, max
                 valid_price_value = ConditionOp.check_price(product, 50)
                 if valid_price_value is None:
                     continue
-                pro_info = ParseData.scrape_product_info(driver, valid_price_value["link"], max_category)
+                pro_info = ParseData.scrape_product_info(driver, valid_price_value["link"])
                 if pro_info["date"] == "" and pro_info["rank"] == "":
                     valid_soldby_value = ConditionOp.check_soldby(pro_info, "Amazon")
                     if valid_soldby_value is None:
@@ -701,10 +691,10 @@ def process_parse_second_category(second_category, pro_file, error_pro_file, max
                                             third_category["category"], key, pro_file, value)
 
 
-def process_retry_error_proinfo(data, pro_file, error_pro_file, max_category):
+def process_retry_error_proinfo(data, pro_file, error_pro_file):
     def process_single_item(driver, item, pro_file, error_pro_file):
         second_category, third_category, min_category, link = item
-        pro_info = ParseData.scrape_product_info(driver, link, max_category)
+        pro_info = ParseData.scrape_product_info(driver, link)
         pro_info["link"] = link
         if pro_info["date"] == "" and pro_info["rank"] == "":
             valid_soldby_value = ConditionOp.check_soldby(pro_info, "Amazon")
@@ -735,7 +725,7 @@ def process_retry_error_proinfo(data, pro_file, error_pro_file, max_category):
     pool.shutdown()
 
 
-def retry_error_data(error_pro_file, pro_file, max_category):
+def retry_error_data(error_pro_file, pro_file):
     error_data = CsvOp.load_error_proinfo(error_pro_file)
     # 清空文件内容，以便重新写入数据，除了标题行
     init_error_pro_file = ['二级类目', '三级类目', '最小类', '链接']
@@ -764,7 +754,7 @@ def retry_error_data(error_pro_file, pro_file, max_category):
         for chunk in chunks:
             if chunk:  # 确保非空
                 process_executor.submit(partial(process_retry_error_proinfo, chunk,
-                                        pro_file, error_pro_file, max_category))
+                                        pro_file, error_pro_file))
 
 
 def main():
@@ -825,15 +815,15 @@ def main():
 
 
 if __name__ == '__main__':
-    multiprocessing.freeze_support()
-    try:
-        main()
-    except KeyboardInterrupt:
-        print('\nKeyboard interrupt detected. Exiting...')
-        os._exit(1)
+    # multiprocessing.freeze_support()
+    # try:
+    #     main()
+    # except KeyboardInterrupt:
+    #     print('\nKeyboard interrupt detected. Exiting...')
+    #     os._exit(1)
 
-    # driver = WebOp.init_driver()
-    # pro_info = ParseData.scrape_product_info(
-    #     driver, "https://www.amazon.ae/Lilly-Pulitzer-Pencil-Case-Something/dp/B09ZJ8H5VP/ref=zg_bs_g_12421756031_d_sccl_81/260-7180514-0292631?psc=1", "Electronics")
-    # print(pro_info)
-    # driver.quit()
+    driver = WebOp.init_driver()
+    pro_info = ParseData.scrape_product_info(
+        driver, "https://www.amazon.com.au/A4-Premium-Printer-Paper-Thailand/dp/B000OZEY3A/ref=zg_bs_g_office-products_d_sccl_1/356-4918866-0486410?th=1")
+    print(pro_info)
+    driver.quit()

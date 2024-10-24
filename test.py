@@ -12,7 +12,24 @@
 
 
 import datetime
+import locale
 
 
 now_str = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
 print(now_str)
+
+def check_date(product: dict, max_days):
+    date_format = '%d %B %Y'
+    date_str = product.get('date')
+    try:
+        locale.setlocale(locale.LC_TIME, 'pt_PT.UTF-8')
+        date_obj = datetime.datetime.strptime(date_str, date_format).date()
+        if datetime.datetime.now().date() - date_obj <= datetime.timedelta(days=max_days):
+            product["date"] = f"{date_obj.year}/{date_obj.month}/{date_obj.day}"
+            return product
+        else:
+            return None
+    except ValueError:
+        return product
+
+print(check_date({'date': '4 maio 2023'}, 1000))

@@ -2,6 +2,7 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_compl
 import csv
 import datetime
 from functools import partial
+import locale
 import multiprocessing
 import os
 import queue
@@ -10,6 +11,7 @@ import sys
 import threading
 from amazoncaptcha import AmazonCaptcha
 from openpyxl import load_workbook
+import regex
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 
@@ -181,6 +183,18 @@ class WebOp:
 class ParseData:
 
     @staticmethod
+    def check_for_throttled(driver: webdriver.Chrome):
+        try:
+            soup = BeautifulSoup(driver.page_source, 'html.parser')
+            throttle_message = soup.find('pre', style='word-wrap: break-word; white-space: pre-wrap;')
+            if throttle_message and 'Request was throttled' in throttle_message.text:
+                return True
+            else:
+                return False
+        except Exception as e:
+            return True
+
+    @staticmethod
     def check_for_captcha(driver: webdriver.Chrome):
         soup = BeautifulSoup(driver.page_source, 'html.parser')
         captcha_form = soup.find('form', {'method': 'get', 'action': '/errors/validateCaptcha'})
@@ -208,9 +222,15 @@ class ParseData:
     def init_web(driver: webdriver.Chrome, url, wait_condition: tuple):
         WebOp.open_url(driver, url)
         wait = WebDriverWait(driver, 5)
-        start_time = time.time()  # 记录开始时间
         flag = False
         WebOp.load_html(driver)
+        while True:
+            if ParseData.check_for_throttled(driver):
+                time.sleep(3)
+                driver.refresh()
+            else:
+                break
+
         try:
             # wait.until(EC.presence_of_element_located(wait_condition))
             wait.until(EC.visibility_of_element_located(wait_condition))
@@ -317,7 +337,7 @@ class ParseData:
             return [{}]
 
     @staticmethod
-    def scrape_product_info(driver: webdriver.Chrome, url, max_category):
+    def scrape_product_info(driver: webdriver.Chrome, url):
         product_info = {
             'dimensions': '',
             'date': '',
@@ -337,27 +357,19 @@ class ParseData:
                 for row in tech_table.find_all('tr'):
                     key = row.find('th').get_text(strip=True)
                     value = row.find('td').get_text(strip=True)
-                    if key == 'Product Dimensions':
+                    if "Dimensões" in key:
                         product_info['dimensions'] = re.sub(r'[\u200e\u200f]', '', value)
                 # 提取附加信息
                 additional_table = info_section.find('table', {'id': 'productDetails_detailBullets_sections1'})
                 for row in additional_table.find_all('tr'):
                     key = row.find('th').get_text(strip=True)
                     value = row.find('td').get_text(strip=True)
-                    if key == 'Best Sellers Rank':
-                        # 移除 Unicode 控制字符
-                        clean_value = re.sub(r'[\u200e\u200f]', '', value)
-                        # 正则表达式匹配前的数字
-                        match = re.search(r'#([\d,]+)', clean_value)
-                        # 如果匹配成功，提取数字，否则返回0
+                    if key == 'Ranking dos mais vendidos':
+                        clean_value = regex.sub(r'\p{P}', '', value)  # 去掉所有的标点符号
+                        match = regex.search(r'([\p{Nd}]+)', clean_value)
                         if match:
-                            # 将逗号去掉后转换为整数
-                            try:
-                                number = int(match.group(1).replace(',', ''))
-                                product_info['rank'] = number
-                            except:
-                                pass
-                    elif key == 'Date First Available':
+                            product_info['rank'] = int(match.group(1))
+                    elif key == 'Disponível para compra desde':
                         product_info['date'] = re.sub(r'[\u200e\u200f]', '', value)
             except Exception as e:
                 pass
@@ -371,22 +383,17 @@ class ParseData:
                     'ul', {'class': 'a-unordered-list a-nostyle a-vertical a-spacing-none detail-bullet-list'})[1]
                 for li in info_section.find_all('li'):
                     text = li.get_text(strip=True)
-                    if 'Product Dimensions' in text:
+                    if 'Dimensões' in text:
                         product_info['dimensions'] = re.sub(r'[\u200e\u200f]', '', text.split(':')[-1].strip())
-                    elif 'Date First Available' in text:
+                    elif 'Disponível' in text:
                         product_info['date'] = re.sub(r'[\u200e\u200f]', '', text.split(':')[-1].strip())
                 for li in info_section2.find_all('li'):
                     text = li.get_text(strip=True)
-                    if 'Best Sellers Rank' in text:
-                        clean_value = re.sub(r'[\u200e\u200f]', '', text.split(':')[-1].strip())
-                        match = re.search(r'#([\d,]+)', clean_value)
+                    if 'Ranking dos mais vendidos' in text:
+                        clean_value = regex.sub(r'\p{P}', '', text.split(':')[-1].strip())
+                        match = regex.search(r'([\p{Nd}]+)', clean_value)
                         if match:
-                            # 将逗号去掉后转换为整数
-                            try:
-                                number = int(match.group(1).replace(',', ''))
-                                product_info['rank'] = number
-                            except:
-                                pass
+                            product_info['rank'] = int(match.group(1))
             except Exception as e:
                 pass
             return product_info
@@ -584,7 +591,10 @@ class ConditionOp:
         date_format = '%d %B %Y'
         date_str = product.get('date')
         try:
+            original_locale = locale.setlocale(locale.LC_TIME)
+            locale.setlocale(locale.LC_TIME, 'pt_PT.UTF-8')
             date_obj = datetime.datetime.strptime(date_str, date_format).date()
+            locale.setlocale(locale.LC_TIME, original_locale)
             if datetime.datetime.now().date() - date_obj <= datetime.timedelta(days=max_days):
                 product["date"] = f"{date_obj.year}/{date_obj.month}/{date_obj.day}"
                 return product
@@ -644,10 +654,10 @@ def process_parse_second_category(second_category, pro_file, error_pro_file, max
         def check_condition(driver: webdriver.Chrome, products, second_category, third_category, min_category):
             remian_products = []
             for product in products:
-                valid_price_value = ConditionOp.check_price(product, 50)
+                valid_price_value = ConditionOp.check_price(product, 100)
                 if valid_price_value is None:
                     continue
-                pro_info = ParseData.scrape_product_info(driver, valid_price_value["link"], max_category)
+                pro_info = ParseData.scrape_product_info(driver, valid_price_value["link"])
                 if pro_info["date"] == "" and pro_info["rank"] == "":
                     valid_soldby_value = ConditionOp.check_soldby(pro_info, "Amazon")
                     if valid_soldby_value is None:
@@ -658,7 +668,7 @@ def process_parse_second_category(second_category, pro_file, error_pro_file, max
                         continue
                 else:
                     valid_price_value.update(pro_info)
-                    pro = ConditionOp.check_all(valid_price_value, 180, "Amazon", 10000)
+                    pro = ConditionOp.check_all(valid_price_value, 360, "Amazon", 10000)
                     if pro is None:
                         continue
                     remian_products.append(pro)
@@ -696,10 +706,10 @@ def process_parse_second_category(second_category, pro_file, error_pro_file, max
                                             third_category["category"], key, pro_file, value)
 
 
-def process_retry_error_proinfo(data, pro_file, error_pro_file, max_category):
+def process_retry_error_proinfo(data, pro_file, error_pro_file):
     def process_single_item(driver, item, pro_file, error_pro_file):
         second_category, third_category, min_category, link = item
-        pro_info = ParseData.scrape_product_info(driver, link, max_category)
+        pro_info = ParseData.scrape_product_info(driver, link)
         pro_info["link"] = link
         if pro_info["date"] == "" and pro_info["rank"] == "":
             valid_soldby_value = ConditionOp.check_soldby(pro_info, "Amazon")
@@ -709,7 +719,7 @@ def process_retry_error_proinfo(data, pro_file, error_pro_file, max_category):
                 CsvOp.write_error_proinfo(error_pro_file, link, second_category, third_category, min_category)
                 return
         else:
-            pro = ConditionOp.check_all(pro_info, 180, "Amazon", 10000)
+            pro = ConditionOp.check_all(pro_info, 360, "Amazon", 10000)
             if pro is None:
                 return
             CsvOp.write_success_proinfo(second_category, third_category, min_category, pro_file, [pro_info])
@@ -730,7 +740,7 @@ def process_retry_error_proinfo(data, pro_file, error_pro_file, max_category):
     pool.shutdown()
 
 
-def retry_error_data(error_pro_file, pro_file, max_category):
+def retry_error_data(error_pro_file, pro_file):
     error_data = CsvOp.load_error_proinfo(error_pro_file)
     # 清空文件内容，以便重新写入数据，除了标题行
     init_error_pro_file = ['二级类目', '三级类目', '最小类', '链接']
@@ -759,7 +769,7 @@ def retry_error_data(error_pro_file, pro_file, max_category):
         for chunk in chunks:
             if chunk:  # 确保非空
                 process_executor.submit(partial(process_retry_error_proinfo, chunk,
-                                        pro_file, error_pro_file, max_category))
+                                        pro_file, error_pro_file))
 
 
 def main():
@@ -791,29 +801,31 @@ def main():
     for i in range(3):
         CsvOp.remove_repeat_proinfo(error_pro_file)
         CsvOp.remove_repeat_proinfo(pro_file)
-        retry_error_data(error_pro_file, pro_file, max_category)
-
+        retry_error_data(error_pro_file, pro_file)
     xlsx_file = CsvOp.format_csv(pro_file)
-
     # 发送邮件
-    attach_file = []
-    if os.path.isabs(xlsx_file) == False:
-        path = os.path.join(os.getcwd(), xlsx_file)
-        attach_file.append(path)
-    else:
-        attach_file.append(xlsx_file)
-    now_str = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-    send_email_with_attachment(
-        subject=f"BR_Amazon_{now_str}",
-        body="最新的亚马逊筛选数据,This email has an attachment.",
-        to_email="837671287@qq.com",
-        from_email="409788696@qq.com",
-        smtp_server="smtp.qq.com",
-        smtp_port=587,
-        login="409788696@qq.com",
-        password="wkevznzegbjmbhbc",
-        file_paths=attach_file
-    )
+
+    def send_email_with_attachment(xlsx_file):
+        attach_file = []
+        if os.path.isabs(xlsx_file) == False:
+            path = os.path.join(os.getcwd(), xlsx_file)
+            attach_file.append(path)
+        else:
+            attach_file.append(xlsx_file)
+        now_str = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        send_email_with_attachment(
+            subject=f"BR_Amazon_{now_str}",
+            body="最新的亚马逊筛选数据,This email has an attachment.",
+            to_email="837671287@qq.com",
+            from_email="409788696@qq.com",
+            smtp_server="smtp.qq.com",
+            smtp_port=587,
+            login="409788696@qq.com",
+            password="wkevznzegbjmbhbc",
+            file_paths=attach_file
+        )
+
+    # send_email_with_attachment(xlsx_file)
     end = time.time()
     print("mid-Time taken:", mid - start, "seconds")
     print("end-Time taken:", end - start, "seconds")
@@ -829,6 +841,6 @@ if __name__ == '__main__':
 
     # driver = WebOp.init_driver()
     # pro_info = ParseData.scrape_product_info(
-    #     driver, "https://www.amazon.ae/Lilly-Pulitzer-Pencil-Case-Something/dp/B09ZJ8H5VP/ref=zg_bs_g_12421756031_d_sccl_81/260-7180514-0292631?psc=1", "Electronics")
+    #     driver, "https://www.amazon.com.br/Amazon-53-024641-Adaptador-de-energia/dp/B086ZK1PP5/ref=zg_bs_g_amazon-devices_d_sccl_10/142-0053349-4269762?psc=1")
     # print(pro_info)
     # driver.quit()
