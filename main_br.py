@@ -226,7 +226,7 @@ class ParseData:
         WebOp.load_html(driver)
         while True:
             if ParseData.check_for_throttled(driver):
-                time.sleep(3)
+                time.sleep(2)
                 driver.refresh()
             else:
                 break
@@ -437,7 +437,7 @@ class ParseData:
             product_info["title"] = parse_pro_title(soup)
         except Exception:
             pass
-
+        print(product_info)
         return product_info
 
     @staticmethod
