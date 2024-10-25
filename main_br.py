@@ -409,7 +409,7 @@ class ParseData:
                 try:
                     product_info[k] = product_info1[k]
                 except:
-                    print(f"{k}未获取到")
+                    pass
 
         def parse_pro_soldby(html_soup: BeautifulSoup):
             sold_by_div = html_soup.find('div', {'id': 'merchantInfoFeature_feature_div'})
@@ -429,7 +429,7 @@ class ParseData:
         try:
             product_info["price"] = parse_pro_price(soup)
         except Exception:
-            print("未获取到价格")
+            pass
 
         def parse_pro_title(html_soup: BeautifulSoup):
             title_div = html_soup.find('div', {'id': 'centerCol'})
@@ -438,7 +438,7 @@ class ParseData:
         try:
             product_info["title"] = parse_pro_title(soup)
         except Exception:
-            print("未获取到标题")
+            pass
         print(product_info)
         return product_info
 
