@@ -572,7 +572,7 @@ class CsvOp:
 
 class ConditionOp:
     @staticmethod
-    def check_price(product: dict, min_price):
+    def check_price(product: dict, min_price=100):
         def extract_number(s):
             match = re.search(r'(\d+)', s)
             if match:
@@ -626,7 +626,8 @@ class ConditionOp:
             return product
 
     @staticmethod
-    def check_all(product: dict, max_days, soldby, rank):
+    def check_all(product: dict, max_days=180, soldby="Amazon", rank=10000):
+        
         date_res = ConditionOp.check_date(product, max_days)
         if date_res is None:
             return None
@@ -656,7 +657,7 @@ def process_parse_second_category(second_category, pro_file, error_pro_file):
         def check_condition(driver: webdriver.Chrome, products, second_category, third_category, min_category):
             remian_products = []
             for product in products:
-                valid_price_value = ConditionOp.check_price(product, 100)
+                valid_price_value = ConditionOp.check_price(product)
                 if valid_price_value is None:
                     continue
                 pro_info = ParseData.scrape_product_info(driver, valid_price_value["link"])
@@ -670,7 +671,7 @@ def process_parse_second_category(second_category, pro_file, error_pro_file):
                         continue
                 else:
                     valid_price_value.update(pro_info)
-                    pro = ConditionOp.check_all(valid_price_value, 360, "Amazon", 10000)
+                    pro = ConditionOp.check_all(valid_price_value)
                     if pro is None:
                         continue
                     remian_products.append(pro)
@@ -721,7 +722,7 @@ def process_retry_error_proinfo(data, pro_file, error_pro_file):
                 CsvOp.write_error_proinfo(error_pro_file, link, second_category, third_category, min_category)
                 return
         else:
-            pro = ConditionOp.check_all(pro_info, 360, "Amazon", 10000)
+            pro = ConditionOp.check_all(pro_info)
             if pro is None:
                 return
             CsvOp.write_success_proinfo(second_category, third_category, min_category, pro_file, [pro_info])
@@ -808,7 +809,7 @@ def main():
     xlsx_file = CsvOp.format_csv(pro_file)
     # 发送邮件
 
-    def send_email_with_attachment(xlsx_file):
+    def send_email(xlsx_file):
         attach_file = []
         if os.path.isabs(xlsx_file) == False:
             path = os.path.join(os.getcwd(), xlsx_file)
@@ -828,7 +829,7 @@ def main():
             file_paths=attach_file
         )
 
-    # send_email_with_attachment(xlsx_file)
+    send_email(xlsx_file)
     end = time.time()
     print("mid-Time taken:", mid - start, "seconds")
     print("end-Time taken:", end - start, "seconds")
@@ -846,3 +847,7 @@ if __name__ == '__main__':
     # pro_info = ParseData.scrape_product_info(
     #     driver, "https://www.amazon.com.br/Cadeira-Escrit%C3%B3rio-Secret%C3%A1ria-Cromada-Rodinha/dp/B0BWSJY84N/ref=zg_bs_g_furniture_d_sccl_2/142-0053349-4269762?psc=1")
     # driver.quit()
+    
+    # pro_file = "ae_Móveis_2024-10-24_14-31-36.csv"
+    # CsvOp.remove_repeat_proinfo(pro_file)
+    # CsvOp.format_csv(pro_file)
