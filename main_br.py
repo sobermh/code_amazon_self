@@ -7,6 +7,7 @@ import multiprocessing
 import os
 import queue
 import re
+import unicodedata
 import regex
 
 from amazoncaptcha import AmazonCaptcha
@@ -620,10 +621,19 @@ class ConditionOp:
         date_format = '%d %B %Y'
         date_str = product.get('date')
         try:
-            original_locale = locale.setlocale(locale.LC_TIME)
-            locale.setlocale(locale.LC_TIME, 'pt_PT.UTF-8')
-            date_obj = datetime.datetime.strptime(date_str, date_format).date()
-            locale.setlocale(locale.LC_TIME, original_locale)
+            if "março" in date_str:
+                date_str = date_str.replace("março", "march")
+                date_obj = datetime.datetime.strptime(
+                    date_str, date_format).date()
+            else:
+                original_locale = locale.setlocale(locale.LC_TIME)
+                try:
+                    locale.setlocale(locale.LC_TIME, 'pt_PT.UTF-8')
+                except:
+                    return product
+                date_obj = datetime.datetime.strptime(
+                    date_str, date_format).date()
+                locale.setlocale(locale.LC_TIME, original_locale)
             if datetime.datetime.now().date() - date_obj <= datetime.timedelta(days=max_days):
                 product["date"] = f"{date_obj.year}/{date_obj.month}/{date_obj.day}"
                 return product
@@ -902,3 +912,25 @@ if __name__ == '__main__':
     # print(min_category)
 
     # driver.quit()
+
+    # def send_email(xlsx_file):
+    #     attach_file = []
+    #     if os.path.isabs(xlsx_file) == False:
+    #         path = os.path.join(os.getcwd(), xlsx_file)
+    #         attach_file.append(path)
+    #     else:
+    #         attach_file.append(xlsx_file)
+    #     now_str = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+    #     send_email_with_attachment(
+    #         subject=f"BR_Amazon_{now_str}",
+    #         body="最新的亚马逊筛选数据,This email has an attachment.",
+    #         to_email="409788696@qq.com",
+    #         from_email="409788696@qq.com",
+    #         smtp_server="smtp.qq.com",
+    #         smtp_port=587,
+    #         login="409788696@qq.com",
+    #         password="wkevznzegbjmbhbc",
+    #         file_paths=attach_file
+    #     )
+
+    # send_email("ae_Ferramentas e Materiais de Construção_2024-10-24_23-34-15.xlsx")

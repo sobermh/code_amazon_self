@@ -3,6 +3,8 @@ from email.mime.base import MIMEBase
 from email import encoders
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import encode_rfc2231
+import os
 import smtplib
 
 
@@ -22,7 +24,14 @@ def send_email_with_attachment(subject, body, to_email, from_email, smtp_server,
             part = MIMEBase('application', 'octet-stream')
             part.set_payload(attachment.read())
             encoders.encode_base64(part)
-            part.add_header('Content-Disposition', f'attachment; filename= {file_path.split("/")[-1]}')
+
+            # 获取文件名并进行编码
+            file_name = os.path.basename(file_path)
+            encoded_file_name = encode_rfc2231(file_name, 'utf-8')
+
+            # 添加附件的 header，使用编码后的文件名
+            part.add_header('Content-Disposition',
+                            f"attachment; filename*={encoded_file_name}")
             msg.attach(part)
 
     try:
@@ -53,5 +62,5 @@ if __name__ == "__main__":
         login="409788696@qq.com",
         password="wkevznzegbjmbhbc",
         file_paths=[r"E:\github_repositories\self_code_amazon\ae_Home_2024-10-21_18-08-23.xlsx",
-                   r"E:\github_repositories\self_code_amazon\ae_Home_2024-10-21_18-08-23 copy.xlsx"]
+                    r"E:\github_repositories\self_code_amazon\ae_Home_2024-10-21_18-08-23 copy.xlsx"]
     )
